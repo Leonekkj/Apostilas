@@ -24,7 +24,7 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Security, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -116,10 +116,8 @@ class KitRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    # TODO: serve app/index.html once Task 6 creates it
-    # from fastapi.responses import FileResponse
-    # return FileResponse("app/index.html")
-    return {"message": "Dashboard em breve"}
+    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app", "index.html")
+    return FileResponse(html_path)
 
 
 # ---------------------------------------------------------------------------

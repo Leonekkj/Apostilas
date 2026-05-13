@@ -1,0 +1,1516 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cognivita — Painel de Controle</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=DM+Sans:wght@300;400;500&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
+  <style>
+    /* ─────────────────────────────────────────────
+       CSS Reset & Variables
+    ───────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #F7F3EC;
+      --sidebar:      #0C3322;
+      --sidebar-text: #C8DDD0;
+      --accent:       #1B6B4A;
+      --card-bg:      #FFFFFF;
+      --card-border:  #E0E8E4;
+      --text:         #1A2820;
+      --muted:        #6B7E76;
+      --success:      #1B6B4A;
+      --error:        #C0392B;
+      --warning:      #D68910;
+      --sidebar-w:    240px;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ─────────────────────────────────────────────
+       Layout
+    ───────────────────────────────────────────── */
+    #app {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ─────────────────────────────────────────────
+       Sidebar
+    ───────────────────────────────────────────── */
+    #sidebar {
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      background: var(--sidebar);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* dot pattern overlay */
+    #sidebar::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(circle, rgba(200,221,208,0.08) 1px, transparent 1px);
+      background-size: 18px 18px;
+      pointer-events: none;
+    }
+
+    .sidebar-inner {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      padding: 28px 0 20px;
+    }
+
+    .sidebar-logo {
+      padding: 0 24px 20px;
+    }
+
+    .sidebar-logo h1 {
+      font-family: 'Cormorant Garamond', serif;
+      font-weight: 600;
+      font-size: 26px;
+      color: #FDFAF5;
+      letter-spacing: 0.01em;
+      line-height: 1.1;
+    }
+
+    .sidebar-logo p {
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 300;
+      font-size: 11px;
+      color: var(--sidebar-text);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-top: 3px;
+      opacity: 0.7;
+    }
+
+    .sidebar-divider {
+      height: 1px;
+      background: rgba(200,221,208,0.15);
+      margin: 0 24px 20px;
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 0 12px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      color: var(--sidebar-text);
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 400;
+      font-size: 13.5px;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      width: 100%;
+      text-align: left;
+      transition: background 0.15s, color 0.15s;
+      letter-spacing: 0.01em;
+    }
+
+    .nav-item:hover {
+      background: rgba(200,221,208,0.1);
+      color: #FDFAF5;
+    }
+
+    .nav-item.active {
+      background: rgba(27,107,74,0.5);
+      color: #FDFAF5;
+      font-weight: 500;
+    }
+
+    .nav-icon {
+      font-size: 16px;
+      width: 20px;
+      text-align: center;
+    }
+
+    .sidebar-bottom {
+      padding: 16px 24px;
+      border-top: 1px solid rgba(200,221,208,0.1);
+    }
+
+    .ml-status-badge {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer;
+      padding: 7px 10px;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+
+    .ml-status-badge:hover {
+      background: rgba(200,221,208,0.08);
+    }
+
+    .ml-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .ml-dot.connected { background: #4CAF50; box-shadow: 0 0 0 2px rgba(76,175,80,0.3); }
+    .ml-dot.disconnected { background: #C0392B; box-shadow: 0 0 0 2px rgba(192,57,43,0.3); }
+
+    .ml-status-text {
+      font-size: 11.5px;
+      color: var(--sidebar-text);
+      opacity: 0.8;
+    }
+
+    /* ─────────────────────────────────────────────
+       Main Content
+    ───────────────────────────────────────────── */
+    #main {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 28px 36px 0;
+      margin-bottom: 8px;
+    }
+
+    .page-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-weight: 600;
+      font-size: 30px;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+
+    .page-content {
+      padding: 20px 36px 40px;
+    }
+
+    /* ─────────────────────────────────────────────
+       Stat chips
+    ───────────────────────────────────────────── */
+    .stats-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+    }
+
+    .stat-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    .stat-chip strong {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--text);
+      font-weight: 400;
+    }
+
+    /* ─────────────────────────────────────────────
+       Grid
+    ───────────────────────────────────────────── */
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    @media (max-width: 1200px) {
+      .grid-3 { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    /* ─────────────────────────────────────────────
+       Product Cards
+    ───────────────────────────────────────────── */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      overflow: hidden;
+      transition: transform 0.18s, box-shadow 0.18s;
+      cursor: default;
+    }
+
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(12,51,34,0.1);
+    }
+
+    .card-thumb {
+      width: 100%;
+      height: 120px;
+      object-fit: cover;
+      display: block;
+      background: linear-gradient(135deg, #E0EDE7 0%, #C8DDD0 100%);
+    }
+
+    .card-thumb-placeholder {
+      width: 100%;
+      height: 120px;
+      background: linear-gradient(135deg, #E0EDE7 0%, #C8DDD0 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 28px;
+    }
+
+    .card-body {
+      padding: 16px;
+    }
+
+    .card-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-weight: 600;
+      font-size: 20px;
+      color: var(--text);
+      line-height: 1.2;
+      margin-bottom: 4px;
+    }
+
+    .card-sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    .card-progress-wrap {
+      margin-bottom: 8px;
+    }
+
+    .progress-bar {
+      height: 4px;
+      border-radius: 2px;
+      background: #E0E8E4;
+      overflow: hidden;
+      margin-bottom: 5px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.4s;
+    }
+
+    .progress-label {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .progress-label span {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text);
+    }
+
+    /* kit thumbnails row */
+    .kit-thumbs {
+      display: flex;
+      gap: 6px;
+      padding: 14px 16px 0;
+    }
+
+    .kit-thumb {
+      width: 56px;
+      height: 56px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: linear-gradient(135deg, #E0EDE7 0%, #C8DDD0 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      color: var(--muted);
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .kit-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* ─────────────────────────────────────────────
+       Buttons
+    ───────────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 500;
+      font-size: 13px;
+      cursor: pointer;
+      border: none;
+      border-radius: 0;
+      transition: background 0.15s, opacity 0.15s;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover { background: #155c3d; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-danger {
+      background: var(--error);
+      color: #fff;
+    }
+
+    .btn-danger:hover { background: #a93226; }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--card-border);
+    }
+
+    .btn-ghost:hover { background: var(--card-bg); color: var(--text); }
+
+    .btn-sm {
+      padding: 5px 12px;
+      font-size: 12px;
+    }
+
+    /* ─────────────────────────────────────────────
+       Table (Anúncios)
+    ───────────────────────────────────────────── */
+    .table-wrap {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    thead th {
+      padding: 12px 16px;
+      text-align: left;
+      font-weight: 500;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--card-border);
+      background: #FAFCFB;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid var(--card-border);
+      transition: background 0.12s;
+    }
+
+    tbody tr:last-child { border-bottom: none; }
+
+    tbody tr:nth-child(even) { background: #FAFCFB; }
+    tbody tr:hover { background: #F0F7F4; }
+
+    td {
+      padding: 11px 16px;
+      vertical-align: middle;
+    }
+
+    .td-thumb {
+      width: 40px;
+      height: 40px;
+      border-radius: 5px;
+      object-fit: cover;
+      background: linear-gradient(135deg, #E0EDE7 0%, #C8DDD0 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+    .td-thumb img {
+      width: 40px;
+      height: 40px;
+      border-radius: 5px;
+      object-fit: cover;
+    }
+
+    .td-title {
+      max-width: 260px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: default;
+    }
+
+    .price-mono {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+    }
+
+    /* ─────────────────────────────────────────────
+       Badges
+    ───────────────────────────────────────────── */
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+
+    .badge-rascunho  { background: #EEF3F1; color: var(--muted); }
+    .badge-publicado { background: #D6EDE3; color: var(--success); }
+    .badge-erro      { background: #FCE9E7; color: var(--error); }
+    .badge-pausado   { background: #FEF5E0; color: var(--warning); }
+    .badge-deletado  { background: #F0EEF0; color: #999; }
+
+    .badge-angulo {
+      background: #EEF3F1;
+      color: var(--muted);
+      font-size: 10px;
+      padding: 2px 7px;
+    }
+
+    /* ─────────────────────────────────────────────
+       Filters bar (Anúncios)
+    ───────────────────────────────────────────── */
+    .filters-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .filter-group {
+      display: flex;
+      gap: 0;
+    }
+
+    .filter-btn {
+      padding: 7px 14px;
+      border: 1px solid var(--card-border);
+      background: var(--card-bg);
+      color: var(--muted);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12.5px;
+      cursor: pointer;
+      margin-left: -1px;
+      transition: background 0.12s, color 0.12s;
+    }
+
+    .filter-btn:first-child { border-radius: 4px 0 0 4px; margin-left: 0; }
+    .filter-btn:last-child  { border-radius: 0 4px 4px 0; }
+
+    .filter-btn.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+      z-index: 1;
+    }
+
+    .search-input {
+      padding: 7px 14px;
+      border: 1px solid var(--card-border);
+      border-radius: 4px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      background: var(--card-bg);
+      color: var(--text);
+      min-width: 220px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .search-input:focus { border-color: var(--accent); }
+    .search-input::placeholder { color: var(--muted); }
+
+    /* ─────────────────────────────────────────────
+       Modal
+    ───────────────────────────────────────────── */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(12,51,34,0.45);
+      backdrop-filter: blur(4px);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-backdrop.open { display: flex; }
+
+    .modal {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      width: 460px;
+      max-width: 95vw;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(12,51,34,0.2);
+    }
+
+    .modal-header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-weight: 600;
+      font-size: 22px;
+      color: var(--text);
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 20px;
+      line-height: 1;
+      padding: 4px;
+      border-radius: 4px;
+      transition: background 0.12s;
+    }
+
+    .modal-close:hover { background: var(--bg); color: var(--text); }
+
+    .modal-body {
+      padding: 24px 28px;
+    }
+
+    .modal-footer {
+      padding: 16px 28px 24px;
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 7px;
+    }
+
+    .form-control {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid var(--card-border);
+      border-radius: 4px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13.5px;
+      color: var(--text);
+      background: var(--bg);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .form-control:focus { border-color: var(--accent); }
+
+    /* checkboxes list for kit modal */
+    .checkbox-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid var(--card-border);
+      border-radius: 4px;
+      padding: 8px;
+      background: var(--bg);
+    }
+
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      cursor: pointer;
+      padding: 5px 6px;
+      border-radius: 4px;
+      transition: background 0.12s;
+    }
+
+    .checkbox-item:hover { background: var(--card-bg); }
+
+    .checkbox-item input { cursor: pointer; accent-color: var(--accent); }
+
+    .checkbox-item label {
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    /* ─────────────────────────────────────────────
+       Token Prompt
+    ───────────────────────────────────────────── */
+    #token-modal .modal {
+      width: 400px;
+    }
+
+    /* ─────────────────────────────────────────────
+       Toasts
+    ───────────────────────────────────────────── */
+    #toast-container {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .toast {
+      background: var(--text);
+      color: #FDFAF5;
+      padding: 12px 20px;
+      border-radius: 6px;
+      font-size: 13px;
+      min-width: 240px;
+      max-width: 360px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+      animation: slideUp 0.25s ease;
+      pointer-events: auto;
+    }
+
+    .toast.success { background: var(--success); }
+    .toast.error   { background: var(--error); }
+    .toast.warning { background: var(--warning); color: var(--text); }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ─────────────────────────────────────────────
+       Loading / Spinner
+    ───────────────────────────────────────────── */
+    .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+    }
+
+    .spinner-page {
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--card-border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 60px auto;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─────────────────────────────────────────────
+       Empty state
+    ───────────────────────────────────────────── */
+    .empty-state {
+      text-align: center;
+      padding: 80px 20px;
+    }
+
+    .empty-state p {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 22px;
+      color: var(--muted);
+      opacity: 0.7;
+    }
+
+    .empty-state .empty-hint {
+      font-family: 'DM Sans', sans-serif;
+      font-style: normal;
+      font-size: 13px;
+      margin-top: 10px;
+      opacity: 0.6;
+    }
+
+    /* ─────────────────────────────────────────────
+       Tab visibility
+    ───────────────────────────────────────────── */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+  </style>
+</head>
+<body>
+
+<div id="app">
+  <!-- ═══════════════════════════════════════════
+       SIDEBAR
+  ═══════════════════════════════════════════ -->
+  <aside id="sidebar">
+    <div class="sidebar-inner">
+      <div class="sidebar-logo">
+        <h1>Cognivita</h1>
+        <p>Painel de Controle</p>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-tab="produtos" onclick="switchTab('produtos')">
+          <span class="nav-icon">📚</span> Produtos
+        </button>
+        <button class="nav-item" data-tab="kits" onclick="switchTab('kits')">
+          <span class="nav-icon">📦</span> Kits
+        </button>
+        <button class="nav-item" data-tab="anuncios" onclick="switchTab('anuncios')">
+          <span class="nav-icon">📋</span> Anúncios
+        </button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="ml-status-badge" id="ml-status-badge" onclick="handleMlClick()">
+          <span class="ml-dot disconnected" id="ml-dot"></span>
+          <span class="ml-status-text" id="ml-status-text">Verificando ML…</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══════════════════════════════════════════
+       MAIN
+  ═══════════════════════════════════════════ -->
+  <main id="main">
+
+    <!-- ── PRODUTOS ─────────────────────────── -->
+    <div id="tab-produtos" class="tab-panel active">
+      <div class="page-header">
+        <h2 class="page-title">Produtos</h2>
+        <button class="btn btn-primary" onclick="openModal('produto-modal')">+ Novo Produto</button>
+      </div>
+      <div class="page-content">
+        <div class="stats-bar" id="stats-bar">
+          <div class="stat-chip"><strong id="stat-apostilas">—</strong> apostilas</div>
+          <div class="stat-chip"><strong id="stat-publicados">—</strong> anúncios publicados</div>
+          <div class="stat-chip"><strong id="stat-rascunhos">—</strong> rascunhos</div>
+        </div>
+        <div id="produtos-grid" class="grid-3">
+          <div class="spinner-page"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── KITS ─────────────────────────────── -->
+    <div id="tab-kits" class="tab-panel">
+      <div class="page-header">
+        <h2 class="page-title">Kits</h2>
+        <button class="btn btn-primary" onclick="openModal('kit-modal')">+ Novo Kit</button>
+      </div>
+      <div class="page-content">
+        <div id="kits-grid" class="grid-3">
+          <div class="spinner-page"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── ANÚNCIOS ──────────────────────────── -->
+    <div id="tab-anuncios" class="tab-panel">
+      <div class="page-header">
+        <h2 class="page-title">Anúncios</h2>
+      </div>
+      <div class="page-content">
+        <div class="filters-bar">
+          <div class="filter-group" id="status-filters">
+            <button class="filter-btn active" data-status="" onclick="setStatusFilter(this, '')">Todos</button>
+            <button class="filter-btn" data-status="rascunho" onclick="setStatusFilter(this, 'rascunho')">Rascunho</button>
+            <button class="filter-btn" data-status="publicado" onclick="setStatusFilter(this, 'publicado')">Publicado</button>
+            <button class="filter-btn" data-status="erro" onclick="setStatusFilter(this, 'erro')">Erro</button>
+          </div>
+          <input
+            class="search-input"
+            type="text"
+            placeholder="Buscar por título…"
+            id="anuncio-search"
+            oninput="filterAnuncios()"
+          />
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:56px"></th>
+                <th>Título</th>
+                <th>Produto / Kit</th>
+                <th>Ângulo</th>
+                <th>Var.</th>
+                <th>Preço</th>
+                <th>Status</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="anuncios-tbody">
+              <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted)"><div class="spinner-page"></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     TOKEN MODAL
+═══════════════════════════════════════════ -->
+<div class="modal-backdrop open" id="token-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Acesso ao Painel</h3>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Token de Administrador</label>
+        <input
+          type="password"
+          class="form-control"
+          id="token-input"
+          placeholder="Cole seu token aqui…"
+          onkeydown="if(event.key==='Enter') saveToken()"
+        />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="saveToken()">Entrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     PRODUTO MODAL
+═══════════════════════════════════════════ -->
+<div class="modal-backdrop" id="produto-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Novo Produto</h3>
+      <button class="modal-close" onclick="closeModal('produto-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Tópico</label>
+        <select class="form-control" id="produto-topico">
+          <option value="">Carregando tópicos…</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Número de Exercícios</label>
+        <select class="form-control" id="produto-exercicios">
+          <option value="60">60 exercícios — R$ 29,90</option>
+          <option value="90">90 exercícios — R$ 34,90</option>
+          <option value="120">120 exercícios — R$ 39,90</option>
+          <option value="150">150 exercícios — R$ 44,90</option>
+        </select>
+      </div>
+      <div id="produto-msg" style="font-size:13px;color:var(--muted);margin-top:-8px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('produto-modal')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-gerar-produto" onclick="gerarProduto()">Gerar Produto</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     KIT MODAL
+═══════════════════════════════════════════ -->
+<div class="modal-backdrop" id="kit-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Novo Kit</h3>
+      <button class="modal-close" onclick="closeModal('kit-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Selecionar Apostilas</label>
+        <div class="checkbox-list" id="kit-apostilas-list">
+          <span style="color:var(--muted);font-size:13px;padding:4px;">Carregando produtos…</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nome do Kit <span style="font-weight:300;text-transform:none;">(opcional — Claude sugere)</span></label>
+        <input type="text" class="form-control" id="kit-nome" placeholder="Ex: Kit Memória + Atenção" />
+      </div>
+      <div id="kit-msg" style="font-size:13px;color:var(--muted);margin-top:-8px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('kit-modal')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-criar-kit" onclick="criarKit()">Criar Kit</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     TOAST CONTAINER
+═══════════════════════════════════════════ -->
+<div id="toast-container"></div>
+
+<!-- ═══════════════════════════════════════════
+     JAVASCRIPT
+═══════════════════════════════════════════ -->
+<script>
+'use strict';
+
+// ─────────────────────────────────────────────
+// Config & State
+// ─────────────────────────────────────────────
+const API_BASE = window.location.origin;
+let TOKEN = localStorage.getItem('admin_token') || '';
+let _allAnuncios = [];
+let _activeStatusFilter = '';
+let _produtos = [];
+let _kits = [];
+let _mlAuthUrl = null;
+
+// ─────────────────────────────────────────────
+// Auth helpers
+// ─────────────────────────────────────────────
+function getHeaders() {
+  return {
+    'Authorization': `Bearer ${TOKEN}`,
+    'Content-Type': 'application/json',
+  };
+}
+
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...opts,
+    headers: { ...getHeaders(), ...(opts.headers || {}) },
+  });
+  return res;
+}
+
+// ─────────────────────────────────────────────
+// Token modal
+// ─────────────────────────────────────────────
+function saveToken() {
+  const val = document.getElementById('token-input').value.trim();
+  if (!val) { showToast('Digite um token válido', 'error'); return; }
+  TOKEN = val;
+  localStorage.setItem('admin_token', TOKEN);
+  closeModalEl(document.getElementById('token-modal'));
+  init();
+}
+
+// ─────────────────────────────────────────────
+// Tab navigation
+// ─────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  document.querySelector(`.nav-item[data-tab="${name}"]`).classList.add('active');
+  window.location.hash = name;
+
+  if (name === 'anuncios') loadAnuncios();
+  if (name === 'kits') loadKits();
+}
+
+function initTabFromHash() {
+  const hash = window.location.hash.replace('#', '');
+  if (['produtos', 'kits', 'anuncios'].includes(hash)) {
+    switchTab(hash);
+  }
+}
+
+// ─────────────────────────────────────────────
+// Modal helpers
+// ─────────────────────────────────────────────
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
+  if (id === 'produto-modal') loadTopicos();
+  if (id === 'kit-modal') populateKitApostilas();
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+function closeModalEl(el) {
+  el.classList.remove('open');
+}
+
+// close on backdrop click
+document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+  backdrop.addEventListener('click', e => {
+    if (e.target === backdrop && backdrop.id !== 'token-modal') {
+      backdrop.classList.remove('open');
+    }
+  });
+});
+
+// ─────────────────────────────────────────────
+// Toast
+// ─────────────────────────────────────────────
+function showToast(msg, type = 'default') {
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, 2700);
+  setTimeout(() => el.remove(), 3100);
+}
+
+// ─────────────────────────────────────────────
+// Stats
+// ─────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const res = await apiFetch('/api/stats');
+    if (!res.ok) return;
+    const data = await res.json();
+    const a = data.anuncios || {};
+    document.getElementById('stat-apostilas').textContent = data.total_produtos ?? '—';
+    document.getElementById('stat-publicados').textContent = a.publicado ?? 0;
+    document.getElementById('stat-rascunhos').textContent = a.rascunho ?? 0;
+  } catch {}
+}
+
+// ─────────────────────────────────────────────
+// Produtos
+// ─────────────────────────────────────────────
+async function loadProdutos() {
+  const grid = document.getElementById('produtos-grid');
+  grid.innerHTML = '<div class="spinner-page"></div>';
+  try {
+    const res = await apiFetch('/api/produtos');
+    if (!res.ok) {
+      if (res.status === 401) { showTokenModal(); return; }
+      throw new Error(`HTTP ${res.status}`);
+    }
+    _produtos = await res.json();
+    renderProdutos(_produtos);
+  } catch (e) {
+    grid.innerHTML = `<div class="empty-state"><p>Erro ao carregar produtos.</p><p class="empty-hint">${e.message}</p></div>`;
+  }
+}
+
+function renderProdutos(list) {
+  const grid = document.getElementById('produtos-grid');
+  if (!list.length) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><p>Nenhum produto ainda.</p><p class="empty-hint">Crie sua primeira apostila com "+ Novo Produto".</p></div>`;
+    return;
+  }
+  grid.innerHTML = list.map(p => {
+    const total = p.total_anuncios || 0;
+    const pub   = p.anuncios_publicados || 0;
+    const pct   = total ? Math.round((pub / total) * 100) : 0;
+    const imgSrc = p.pdf_path
+      ? `/output/images/apostila_${p.id}_v1.png`
+      : null;
+    const thumb = imgSrc
+      ? `<img class="card-thumb" src="${imgSrc}" alt="capa" onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>📚</div>'">`
+      : `<div class="card-thumb-placeholder">📚</div>`;
+    return `
+      <div class="card">
+        ${thumb}
+        <div class="card-body">
+          <div class="card-title">${esc(p.topico_nome || 'Apostila')}</div>
+          <div class="card-sub">${p.num_exercicios || 60} exercícios</div>
+          <div class="card-progress-wrap">
+            <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+            <div class="progress-label">
+              <span>${pub}</span> publicados &nbsp;·&nbsp; <span>${total - pub}</span> rascunhos
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────
+// Tópicos (for produto modal)
+// ─────────────────────────────────────────────
+async function loadTopicos() {
+  const sel = document.getElementById('produto-topico');
+  sel.innerHTML = '<option value="">Carregando…</option>';
+  try {
+    const res = await apiFetch('/api/topicos');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const topicos = await res.json();
+    if (!topicos.length) {
+      sel.innerHTML = '<option value="">Nenhum tópico disponível</option>';
+      return;
+    }
+    sel.innerHTML = topicos.map(t => `<option value="${t.id}">${esc(t.nome)}</option>`).join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="">Erro ao carregar tópicos</option>';
+    showToast(`Erro ao carregar tópicos: ${e.message}`, 'error');
+  }
+}
+
+async function gerarProduto() {
+  const topicoId = parseInt(document.getElementById('produto-topico').value);
+  const numEx    = parseInt(document.getElementById('produto-exercicios').value);
+  const msg      = document.getElementById('produto-msg');
+  const btn      = document.getElementById('btn-gerar-produto');
+
+  if (!topicoId) { showToast('Selecione um tópico', 'error'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Gerando…';
+  msg.textContent = 'Isso pode levar alguns minutos…';
+
+  try {
+    const res = await apiFetch('/api/produto', {
+      method: 'POST',
+      body: JSON.stringify({ topico_id: topicoId, num_exercicios: numEx }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+    showToast(`Produto criado! ${data.anuncios?.length || 0} anúncios gerados.`, 'success');
+    closeModal('produto-modal');
+    await loadProdutos();
+    await loadStats();
+  } catch (e) {
+    msg.textContent = '';
+    showToast(`Erro: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Gerar Produto';
+    msg.textContent = '';
+  }
+}
+
+// ─────────────────────────────────────────────
+// Kits
+// ─────────────────────────────────────────────
+async function loadKits() {
+  const grid = document.getElementById('kits-grid');
+  grid.innerHTML = '<div class="spinner-page"></div>';
+  try {
+    const res = await apiFetch('/api/kits');
+    if (!res.ok) {
+      if (res.status === 401) { showTokenModal(); return; }
+      throw new Error(`HTTP ${res.status}`);
+    }
+    _kits = await res.json();
+    renderKits(_kits);
+  } catch (e) {
+    grid.innerHTML = `<div class="empty-state"><p>Erro ao carregar kits.</p><p class="empty-hint">${e.message}</p></div>`;
+  }
+}
+
+function renderKits(list) {
+  const grid = document.getElementById('kits-grid');
+  if (!list.length) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><p>Nenhum kit criado.</p><p class="empty-hint">Combine apostilas com "+ Novo Kit".</p></div>`;
+    return;
+  }
+  grid.innerHTML = list.map(k => {
+    const ids = k.apostila_ids_list || [];
+    const thumbsHtml = ids.slice(0, 3).map(id => {
+      const p = _produtos.find(pr => pr.id === id);
+      const imgSrc = p ? `/output/images/apostila_${id}_v1.png` : null;
+      return imgSrc
+        ? `<div class="kit-thumb"><img src="${imgSrc}" alt="capa" onerror="this.outerHTML='📚'"></div>`
+        : `<div class="kit-thumb">📚</div>`;
+    }).join('');
+    const totalEx = ids.reduce((sum, id) => {
+      const p = _produtos.find(pr => pr.id === id);
+      return sum + (p ? (p.num_exercicios || 0) : 0);
+    }, 0);
+    return `
+      <div class="card">
+        <div class="kit-thumbs">${thumbsHtml}</div>
+        <div class="card-body">
+          <div class="card-title">${esc(k.nome || 'Kit')}</div>
+          <div class="card-sub">${ids.length} apostila${ids.length !== 1 ? 's' : ''} · ${totalEx} exercícios</div>
+          <div class="card-progress-wrap">
+            <div class="progress-label">
+              <span>${k.apostila_count || ids.length}</span> apostila${(k.apostila_count || ids.length) !== 1 ? 's' : ''} no kit
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function populateKitApostilas() {
+  const list = document.getElementById('kit-apostilas-list');
+  if (!_produtos.length) {
+    list.innerHTML = '<span style="color:var(--muted);font-size:13px;padding:4px;">Nenhum produto disponível. Crie um produto primeiro.</span>';
+    return;
+  }
+  list.innerHTML = _produtos.map(p => `
+    <label class="checkbox-item">
+      <input type="checkbox" value="${p.id}" />
+      <span>${esc(p.topico_nome || 'Apostila')} — ${p.num_exercicios || 60} ex</span>
+    </label>`).join('');
+}
+
+async function criarKit() {
+  const checks = document.querySelectorAll('#kit-apostilas-list input:checked');
+  const apostila_ids = Array.from(checks).map(c => parseInt(c.value));
+  const nome = document.getElementById('kit-nome').value.trim();
+  const msg  = document.getElementById('kit-msg');
+  const btn  = document.getElementById('btn-criar-kit');
+
+  if (!apostila_ids.length) { showToast('Selecione ao menos uma apostila', 'error'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Criando…';
+  msg.textContent = 'Gerando anúncios do kit…';
+
+  try {
+    const res = await apiFetch('/api/kit', {
+      method: 'POST',
+      body: JSON.stringify({ apostila_ids, nome: nome || null }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+    showToast(`Kit "${data.nome}" criado com ${data.anuncios?.length || 0} anúncios!`, 'success');
+    closeModal('kit-modal');
+    await loadKits();
+    await loadStats();
+  } catch (e) {
+    msg.textContent = '';
+    showToast(`Erro: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Criar Kit';
+    msg.textContent = '';
+  }
+}
+
+// ─────────────────────────────────────────────
+// Anúncios
+// ─────────────────────────────────────────────
+async function loadAnuncios() {
+  const tbody = document.getElementById('anuncios-tbody');
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;"><div class="spinner-page"></div></td></tr>';
+  try {
+    const url = _activeStatusFilter ? `/api/anuncios?status=${_activeStatusFilter}` : '/api/anuncios';
+    const res = await apiFetch(url);
+    if (!res.ok) {
+      if (res.status === 401) { showTokenModal(); return; }
+      throw new Error(`HTTP ${res.status}`);
+    }
+    _allAnuncios = await res.json();
+    filterAnuncios();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--error);">Erro ao carregar anúncios: ${e.message}</td></tr>`;
+  }
+}
+
+function setStatusFilter(btn, status) {
+  document.querySelectorAll('#status-filters .filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _activeStatusFilter = status;
+  loadAnuncios();
+}
+
+function filterAnuncios() {
+  const q = (document.getElementById('anuncio-search').value || '').toLowerCase();
+  const list = _allAnuncios.filter(a =>
+    !q || (a.titulo || '').toLowerCase().includes(q)
+  );
+  renderAnuncios(list);
+}
+
+function renderAnuncios(list) {
+  const tbody = document.getElementById('anuncios-tbody');
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><p>Nenhum anúncio encontrado.</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = list.map(a => {
+    const imgSrc = a.imagem_path ? `/${a.imagem_path}` : null;
+    const thumb = imgSrc
+      ? `<div class="td-thumb"><img src="${imgSrc}" alt="" onerror="this.parentElement.innerHTML='📋'"></div>`
+      : `<div class="td-thumb">📋</div>`;
+    const nomeProduto = a.topico_nome || a.kit_nome || `#${a.apostila_id || a.kit_id || '—'}`;
+    const preco = a.preco != null ? `R$ ${parseFloat(a.preco).toFixed(2).replace('.', ',')}` : '—';
+    const badgeClass = {
+      rascunho: 'badge-rascunho',
+      publicado: 'badge-publicado',
+      erro: 'badge-erro',
+      pausado: 'badge-pausado',
+      deletado: 'badge-deletado',
+    }[a.status] || 'badge-rascunho';
+
+    const publishBtn = a.status !== 'publicado'
+      ? `<button class="btn btn-sm btn-primary" onclick="publicarAnuncio(${a.id}, this)">Publicar</button>`
+      : `<span style="color:var(--muted);font-size:12px;">—</span>`;
+
+    return `
+      <tr id="anuncio-row-${a.id}">
+        <td>${thumb}</td>
+        <td><div class="td-title" title="${esc(a.titulo || '')}">${esc(a.titulo || '—')}</div></td>
+        <td style="font-size:12px;color:var(--muted);">${esc(nomeProduto)}</td>
+        <td><span class="badge badge-angulo">${esc(a.angulo || '—')}</span></td>
+        <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px;">${a.variacao ?? '—'}</td>
+        <td class="price-mono">${preco}</td>
+        <td><span class="badge ${badgeClass}">${a.status || 'rascunho'}</span></td>
+        <td>${publishBtn}</td>
+      </tr>`;
+  }).join('');
+}
+
+async function publicarAnuncio(id, btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    const res = await apiFetch(`/api/anuncios/${id}/publicar`, { method: 'POST' });
+    if (res.status === 501) {
+      showToast('Integração ML ainda não configurada', 'warning');
+    } else if (res.ok) {
+      showToast('Anúncio publicado!', 'success');
+      // update row badge
+      const row = document.getElementById(`anuncio-row-${id}`);
+      if (row) {
+        row.querySelector('.badge').className = 'badge badge-publicado';
+        row.querySelector('.badge').textContent = 'publicado';
+        row.querySelector('td:last-child').innerHTML = '<span style="color:var(--muted);font-size:12px;">—</span>';
+      }
+    } else {
+      const d = await res.json().catch(() => ({}));
+      showToast(d.detail || d.error || `Erro HTTP ${res.status}`, 'error');
+    }
+  } catch (e) {
+    showToast(`Erro: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Publicar';
+  }
+}
+
+// ─────────────────────────────────────────────
+// ML Status
+// ─────────────────────────────────────────────
+async function loadMlStatus() {
+  try {
+    const res = await fetch(`${API_BASE}/api/ml/status`);
+    const data = await res.json();
+    const dot  = document.getElementById('ml-dot');
+    const txt  = document.getElementById('ml-status-text');
+    if (data.conectado) {
+      dot.className = 'ml-dot connected';
+      txt.textContent = 'ML conectado';
+    } else {
+      dot.className = 'ml-dot disconnected';
+      txt.textContent = 'ML desconectado';
+    }
+  } catch {
+    document.getElementById('ml-status-text').textContent = 'ML: erro';
+  }
+}
+
+async function handleMlClick() {
+  try {
+    const res = await fetch(`${API_BASE}/api/ml/auth`);
+    if (res.status === 501) {
+      showToast('Integração ML em breve', 'warning');
+    } else if (res.ok) {
+      const d = await res.json();
+      if (d.url) window.open(d.url, '_blank');
+    }
+  } catch {
+    showToast('Erro ao verificar ML', 'error');
+  }
+}
+
+// ─────────────────────────────────────────────
+// Utility
+// ─────────────────────────────────────────────
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function showTokenModal() {
+  document.getElementById('token-modal').classList.add('open');
+}
+
+// ─────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────
+async function init() {
+  if (!TOKEN) {
+    showTokenModal();
+    return;
+  }
+  // hide token modal if token exists
+  closeModalEl(document.getElementById('token-modal'));
+
+  initTabFromHash();
+  await Promise.all([loadStats(), loadProdutos(), loadMlStatus()]);
+}
+
+init();
+</script>
+</body>
+</html>
