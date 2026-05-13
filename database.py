@@ -223,6 +223,7 @@ def listar_anuncios(
     tipo: Optional[str] = None,
     topico_id: Optional[int] = None,
     kit_id: Optional[int] = None,
+    apostila_id: Optional[int] = None,
     limite: int = 100,
     offset: int = 0,
 ) -> list[dict]:
@@ -262,6 +263,9 @@ def listar_anuncios(
         if kit_id is not None:
             sql += " AND an.kit_id = ?"
             params.append(kit_id)
+        if apostila_id is not None:
+            sql += " AND an.apostila_id = ?"
+            params.append(apostila_id)
 
         sql += " ORDER BY an.id DESC LIMIT ? OFFSET ?"
         params.extend([limite, offset])

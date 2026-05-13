@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import database
 
@@ -102,7 +102,7 @@ def _get_preco(num_exercicios: int) -> float:
 
 class ProdutoRequest(BaseModel):
     topico_id: int
-    num_exercicios: int = 60
+    num_exercicios: int = Field(default=60, ge=1, le=150)
 
 
 class KitRequest(BaseModel):
@@ -178,6 +178,7 @@ async def criar_produto(body: ProdutoRequest, _auth=Depends(_require_auth)):
     num = body.num_exercicios
     preco = _get_preco(num)
 
+    generated_files: list[str] = []
     try:
         # 2. Generate content
         conteudo_json = await asyncio.to_thread(
@@ -193,6 +194,7 @@ async def criar_produto(body: ProdutoRequest, _auth=Depends(_require_auth)):
         pdf_path = await asyncio.to_thread(
             pdf.gerar_pdf, apostila_id, topico, conteudo_json
         )
+        generated_files.append(pdf_path)
 
         # 5. Update PDF path
         await asyncio.to_thread(database.atualizar_pdf_apostila, apostila_id, pdf_path)
@@ -208,6 +210,7 @@ async def criar_produto(body: ProdutoRequest, _auth=Depends(_require_auth)):
             image_paths = await asyncio.to_thread(
                 images.gerar_capas, apostila_id, topico, num, i
             )
+            generated_files.extend(image_paths)
             image_path = image_paths[0] if image_paths else None
 
             # b. Create anuncio record
@@ -234,7 +237,12 @@ async def criar_produto(body: ProdutoRequest, _auth=Depends(_require_auth)):
         return {"apostila_id": apostila_id, "anuncios": anuncios_result}
 
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        for fpath in generated_files:
+            try:
+                os.remove(fpath)
+            except OSError:
+                pass
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar produto: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -266,10 +274,10 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
     if not nome:
         nome = await asyncio.to_thread(content.sugerir_nome_kit, apostilas)
 
+    generated_files: list[str] = []
     try:
         # Create kit record
         kit_id = await asyncio.to_thread(database.criar_kit, nome, body.apostila_ids)
-        kit = await asyncio.to_thread(database.buscar_kit, kit_id)
 
         # Total exercicios for pricing
         total_exercicios = sum(ap.get("num_exercicios", 0) for ap in apostilas)
@@ -290,6 +298,7 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
             image_paths = await asyncio.to_thread(
                 images.gerar_capas_kit, kit_id, nome, apostilas, i
             )
+            generated_files.extend(image_paths)
             image_path = image_paths[0] if image_paths else None
 
             anuncio_id = await asyncio.to_thread(
@@ -316,7 +325,12 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        for fpath in generated_files:
+            try:
+                os.remove(fpath)
+            except OSError:
+                pass
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar kit: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -335,11 +349,10 @@ async def listar_anuncios(
         None,         # tipo
         None,         # topico_id
         None,         # kit_id
+        apostila_id,  # apostila_id filter
         200,          # limite
         0,            # offset
     )
-    if apostila_id is not None:
-        anuncios = [a for a in anuncios if a.get("apostila_id") == apostila_id]
     return anuncios
 
 
