@@ -1,7 +1,6 @@
 import sqlite3
 import json
 import os
-from datetime import datetime
 from typing import Optional
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "apostilas.db")
@@ -67,7 +66,9 @@ def criar_tabelas() -> None:
             );
         """)
 
-        # Migration: add new columns to anuncios (SQLite workaround for ADD COLUMN IF NOT EXISTS)
+        # Migration: add new columns to anuncios (SQLite workaround for ADD COLUMN IF NOT EXISTS).
+        # SQLite does not support FK constraints in ALTER TABLE, so kit_id has no REFERENCES
+        # clause here. Integrity is enforced at application level in criar_anuncio().
         for col_name, col_def in [
             ("variacao", "INTEGER DEFAULT 1"),
             ("angulo",   "TEXT DEFAULT ''"),
@@ -198,6 +199,11 @@ def criar_anuncio(
 
     Para anúncios de kit, apostila_id pode ser NULL e kit_id deve ser informado.
     """
+    if apostila_id is None and kit_id is None:
+        raise ValueError("criar_anuncio: apostila_id ou kit_id deve ser informado")
+    if apostila_id is not None and kit_id is not None:
+        raise ValueError("criar_anuncio: apostila_id e kit_id são mutuamente exclusivos")
+
     conn = _get_conn()
     try:
         cur = conn.execute(
@@ -352,7 +358,10 @@ def listar_kits() -> list:
         cur = conn.execute("SELECT * FROM kits ORDER BY id DESC")
         rows = [dict(row) for row in cur.fetchall()]
         for kit in rows:
-            ids = json.loads(kit.get("apostila_ids") or "[]")
+            try:
+                ids = json.loads(kit.get("apostila_ids") or "[]")
+            except json.JSONDecodeError:
+                ids = []
             kit["apostila_count"] = len(ids)
             kit["apostila_ids_list"] = ids
         return rows
@@ -369,7 +378,10 @@ def buscar_kit(kit_id: int) -> Optional[dict]:
         if row is None:
             return None
         kit = dict(row)
-        ids = json.loads(kit.get("apostila_ids") or "[]")
+        try:
+            ids = json.loads(kit.get("apostila_ids") or "[]")
+        except json.JSONDecodeError:
+            ids = []
         kit["apostila_count"] = len(ids)
         kit["apostila_ids_list"] = ids
         return kit
