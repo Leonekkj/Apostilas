@@ -1,6 +1,6 @@
 """
 generator/content.py
-Cognivita — geração de conteúdo via Claude API.
+Cognivita — geração de conteúdo via Groq API (Llama 3.3 70B).
 
 Funções:
   gerar_conteudo(topico, num_exercicios)       -> str (JSON)
@@ -12,21 +12,21 @@ Funções:
 import json
 import os
 
-import anthropic
+from groq import Groq
 
 # ---------------------------------------------------------------------------
 # Cliente (lazy-initialized so the module can be imported without a key)
 # ---------------------------------------------------------------------------
 
-def _client() -> anthropic.Anthropic:
-    return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+def _client() -> Groq:
+    return Groq(api_key=os.environ["GROQ_API_KEY"])
 
 
 # ---------------------------------------------------------------------------
 # Constantes de modelo / tokens
 # ---------------------------------------------------------------------------
 
-_MODEL = "claude-haiku-4-5"   # rápido e barato; adequado para geração de conteúdo estruturado
+_MODEL = "llama-3.3-70b-versatile"   # Groq — gratuito, rápido, ótima qualidade
 
 _SYSTEM_CONTEUDO = """\
 Você é especialista em estimulação cognitiva para idosos. \
@@ -117,20 +117,16 @@ Gere todos os {num_exercicios} exercícios no array "exercicios".\
 """
 
     client = _client()
-    response = client.messages.create(
+    response = client.chat.completions.create(
         model=_MODEL,
         max_tokens=4096,
-        system=[
-            {
-                "type": "text",
-                "text": _SYSTEM_CONTEUDO,
-                "cache_control": {"type": "ephemeral"},
-            }
+        messages=[
+            {"role": "system", "content": _SYSTEM_CONTEUDO},
+            {"role": "user", "content": prompt},
         ],
-        messages=[{"role": "user", "content": prompt}],
     )
 
-    raw = response.content[0].text
+    raw = response.choices[0].message.content
     # Valida que é JSON e devolve como string formatada
     parsed = _parse_json(raw)
     return json.dumps(parsed, ensure_ascii=False, indent=2)
@@ -226,14 +222,16 @@ Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 """
 
     client = _client()
-    response = client.messages.create(
+    response = client.chat.completions.create(
         model=_MODEL,
         max_tokens=1024,
-        system=_SYSTEM_TITULOS,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": _SYSTEM_TITULOS},
+            {"role": "user", "content": prompt},
+        ],
     )
 
-    raw = response.content[0].text
+    raw = response.choices[0].message.content
     result = _parse_json(raw)
 
     if not isinstance(result, list) or len(result) != 6:
@@ -312,14 +310,16 @@ Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 """
 
     client = _client()
-    response = client.messages.create(
+    response = client.chat.completions.create(
         model=_MODEL,
         max_tokens=1024,
-        system=_SYSTEM_TITULOS,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": _SYSTEM_TITULOS},
+            {"role": "user", "content": prompt},
+        ],
     )
 
-    raw = response.content[0].text
+    raw = response.choices[0].message.content
     result = _parse_json(raw)
 
     if not isinstance(result, list) or len(result) != 6:
@@ -362,15 +362,17 @@ Retorne SOMENTE o nome, sem aspas, sem ponto final, sem explicação.\
 """
 
     client = _client()
-    response = client.messages.create(
+    response = client.chat.completions.create(
         model=_MODEL,
         max_tokens=64,
-        system="Você é especialista em naming de produtos para o público 60+. "
-               "Responda apenas com o nome solicitado, sem explicações adicionais.",
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": "Você é especialista em naming de produtos para o público 60+. "
+                                           "Responda apenas com o nome solicitado, sem explicações adicionais."},
+            {"role": "user", "content": prompt},
+        ],
     )
 
-    nome = response.content[0].text.strip().strip('"').strip("'").rstrip(".")
+    nome = response.choices[0].message.content.strip().strip('"').strip("'").rstrip(".")
     return nome
 
 
@@ -397,10 +399,10 @@ if __name__ == "__main__":
     print()
     print('  topico = {"nome": "Memória", "descricao": "Exercícios de memória de curto e longo prazo"}')
     print()
-    print('  # Gerar conteúdo (requer ANTHROPIC_API_KEY)')
+    print('  # Gerar conteúdo (requer GROQ_API_KEY)')
     print('  conteudo_json = gerar_conteudo(topico, num_exercicios=60)')
     print()
-    print('  # Gerar títulos ML (requer ANTHROPIC_API_KEY)')
+    print('  # Gerar títulos ML (requer GROQ_API_KEY)')
     print('  titulos = gerar_titulos_ml(topico, num_exercicios=60)')
     print()
     print("Estrutura esperada de gerar_conteudo:")
