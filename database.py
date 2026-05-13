@@ -393,6 +393,33 @@ def buscar_kit(kit_id: int) -> Optional[dict]:
 # Produtos (apostilas com contagem de anúncios)
 # ---------------------------------------------------------------------------
 
+def buscar_topico_por_id(topico_id: int) -> Optional[dict]:
+    """Retorna um tópico pelo id ou None se não encontrado."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute("SELECT * FROM topicos WHERE id = ?", (topico_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def buscar_apostila_por_id(apostila_id: int) -> Optional[dict]:
+    """Retorna uma apostila pelo id com dados do tópico, ou None se não encontrada."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT ap.*, tp.nome AS topico_nome, tp.slug AS topico_slug "
+            "FROM apostilas ap LEFT JOIN topicos tp ON ap.topico_id = tp.id "
+            "WHERE ap.id = ?",
+            (apostila_id,),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def listar_produtos() -> list:
     """Retorna apostilas únicas com info do tópico e contagem de anúncios."""
     conn = _get_conn()
