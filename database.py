@@ -1,0 +1,529 @@
+import sqlite3
+import json
+import os
+from datetime import datetime
+from typing import Optional
+
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "apostilas.db")
+
+
+def _get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def criar_tabelas() -> None:
+    """Cria todas as tabelas se não existirem e popula tópicos padrão."""
+    conn = _get_conn()
+    try:
+        cur = conn.cursor()
+
+        cur.executescript("""
+            CREATE TABLE IF NOT EXISTS topicos (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome     TEXT NOT NULL,
+                slug     TEXT UNIQUE NOT NULL,
+                keywords TEXT,
+                ativo    INTEGER DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS apostilas (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                topico_id      INTEGER REFERENCES topicos(id),
+                num_exercicios INTEGER NOT NULL,
+                conteudo_json  TEXT,
+                pdf_path       TEXT,
+                criado_em      TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS anuncios (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                apostila_id  INTEGER REFERENCES apostilas(id),
+                tipo         TEXT NOT NULL,
+                template_id  INTEGER DEFAULT 1,
+                ml_id        TEXT,
+                status       TEXT DEFAULT 'rascunho',
+                titulo       TEXT,
+                preco        REAL,
+                imagem_path  TEXT,
+                publicado_em TEXT,
+                erro_msg     TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS ml_tokens (
+                id            INTEGER PRIMARY KEY DEFAULT 1,
+                access_token  TEXT,
+                refresh_token TEXT,
+                expires_at    TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS kits (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome         TEXT NOT NULL,
+                apostila_ids TEXT NOT NULL,
+                criado_em    TEXT DEFAULT (datetime('now'))
+            );
+        """)
+
+        # Migration: add new columns to anuncios (SQLite workaround for ADD COLUMN IF NOT EXISTS)
+        for col_name, col_def in [
+            ("variacao", "INTEGER DEFAULT 1"),
+            ("angulo",   "TEXT DEFAULT ''"),
+            ("kit_id",   "INTEGER"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE anuncios ADD COLUMN {col_name} {col_def}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
+        conn.commit()
+        seed_topicos(conn)
+    finally:
+        conn.close()
+
+
+def seed_topicos(conn: Optional[sqlite3.Connection] = None) -> None:
+    """Insere os 6 tópicos padrão se a tabela estiver vazia."""
+    close_after = conn is None
+    if conn is None:
+        conn = _get_conn()
+
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM topicos")
+        count = cur.fetchone()[0]
+        if count > 0:
+            return
+
+        topicos = [
+            ("Coordenação Motora", "coordenacao-motora",
+             "coordenação motora exercícios crianças"),
+            ("Memória", "memoria",
+             "memória exercícios cognitivos estimulação"),
+            ("Coordenação Motora Fina", "coordenacao-motora-fina",
+             "coordenação motora fina pinça caligrafia"),
+            ("Atenção e Concentração", "atencao-concentracao",
+             "atenção concentração foco exercícios"),
+            ("Percepção Visual", "percepcao-visual",
+             "percepção visual discriminação figura fundo"),
+            ("Sequência Lógica", "sequencia-logica",
+             "sequência lógica raciocínio ordem"),
+        ]
+
+        cur.executemany(
+            "INSERT INTO topicos (nome, slug, keywords) VALUES (?, ?, ?)",
+            topicos,
+        )
+        conn.commit()
+    finally:
+        if close_after:
+            conn.close()
+
+
+def listar_topicos() -> list[dict]:
+    """Retorna todos os tópicos ativos."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute("SELECT * FROM topicos WHERE ativo = 1 ORDER BY id")
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def buscar_topico(slug: str) -> Optional[dict]:
+    """Retorna um tópico pelo slug ou None se não encontrado."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute("SELECT * FROM topicos WHERE slug = ?", (slug,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def salvar_apostila(topico_id: int, num_exercicios: int, conteudo_json: str) -> int:
+    """Insere uma nova apostila e retorna o id gerado."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO apostilas (topico_id, num_exercicios, conteudo_json) VALUES (?, ?, ?)",
+            (topico_id, num_exercicios, conteudo_json),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def buscar_apostila(topico_id: int, num_exercicios: int) -> Optional[dict]:
+    """Retorna apostila existente para esse tópico+variação (cache)."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT * FROM apostilas WHERE topico_id = ? AND num_exercicios = ? ORDER BY id DESC LIMIT 1",
+            (topico_id, num_exercicios),
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def atualizar_pdf_apostila(apostila_id: int, pdf_path: str) -> None:
+    """Atualiza o caminho do PDF de uma apostila."""
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "UPDATE apostilas SET pdf_path = ? WHERE id = ?",
+            (pdf_path, apostila_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def criar_anuncio(
+    apostila_id: Optional[int] = None,
+    tipo: str = "",
+    template_id: int = 1,
+    titulo: str = "",
+    preco: float = 0.0,
+    variacao: int = 1,
+    angulo: str = "",
+    kit_id: Optional[int] = None,
+) -> int:
+    """Insere um anúncio com status='rascunho' e retorna o id.
+
+    Para anúncios de kit, apostila_id pode ser NULL e kit_id deve ser informado.
+    """
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            """INSERT INTO anuncios
+               (apostila_id, tipo, template_id, titulo, preco, status, variacao, angulo, kit_id)
+               VALUES (?, ?, ?, ?, ?, 'rascunho', ?, ?, ?)""",
+            (apostila_id, tipo, template_id, titulo, preco, variacao, angulo, kit_id),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def listar_anuncios(
+    status: Optional[str] = None,
+    tipo: Optional[str] = None,
+    topico_id: Optional[int] = None,
+    kit_id: Optional[int] = None,
+    limite: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """Lista anúncios com LEFT JOIN em apostilas, tópicos e kits.
+
+    Inclui anúncios de kit (apostila_id=NULL). Retorna topico_nome e kit_nome.
+    """
+    conn = _get_conn()
+    try:
+        sql = """
+            SELECT
+                an.*,
+                ap.topico_id,
+                ap.num_exercicios,
+                ap.pdf_path,
+                ap.criado_em AS apostila_criado_em,
+                tp.nome AS topico_nome,
+                tp.slug AS topico_slug,
+                kt.nome AS kit_nome
+            FROM anuncios an
+            LEFT JOIN apostilas ap ON an.apostila_id = ap.id
+            LEFT JOIN topicos   tp ON ap.topico_id   = tp.id
+            LEFT JOIN kits      kt ON an.kit_id       = kt.id
+            WHERE 1=1
+        """
+        params: list = []
+
+        if status is not None:
+            sql += " AND an.status = ?"
+            params.append(status)
+        if tipo is not None:
+            sql += " AND an.tipo = ?"
+            params.append(tipo)
+        if topico_id is not None:
+            sql += " AND ap.topico_id = ?"
+            params.append(topico_id)
+        if kit_id is not None:
+            sql += " AND an.kit_id = ?"
+            params.append(kit_id)
+
+        sql += " ORDER BY an.id DESC LIMIT ? OFFSET ?"
+        params.extend([limite, offset])
+
+        cur = conn.execute(sql, params)
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def buscar_anuncios_rascunho(limite: int = 30) -> list[dict]:
+    """Retorna até `limite` anúncios com status='rascunho', incluindo dados da apostila."""
+    return listar_anuncios(status="rascunho", limite=limite)
+
+
+def atualizar_anuncio(anuncio_id: int, **kwargs) -> None:
+    """Atualiza campos dinâmicos de um anúncio (só atualiza campos passados)."""
+    if not kwargs:
+        return
+
+    campos_permitidos = {
+        "status", "ml_id", "imagem_path", "erro_msg",
+        "publicado_em", "titulo", "preco", "template_id",
+        "variacao", "angulo", "kit_id",
+    }
+    campos = {k: v for k, v in kwargs.items() if k in campos_permitidos}
+    if not campos:
+        return
+
+    set_clause = ", ".join(f"{col} = ?" for col in campos)
+    values = list(campos.values()) + [anuncio_id]
+
+    conn = _get_conn()
+    try:
+        conn.execute(
+            f"UPDATE anuncios SET {set_clause} WHERE id = ?",
+            values,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def contar_anuncios(status: Optional[str] = None) -> dict:
+    """Retorna contagem de anúncios por status."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            """SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN status = 'publicado' THEN 1 ELSE 0 END) AS publicados,
+                SUM(CASE WHEN status = 'rascunho'  THEN 1 ELSE 0 END) AS rascunho,
+                SUM(CASE WHEN status = 'erro'      THEN 1 ELSE 0 END) AS erro,
+                SUM(CASE WHEN status = 'pausado'   THEN 1 ELSE 0 END) AS pausado
+            FROM anuncios
+            """
+            + ("WHERE status = ?" if status else ""),
+            ([status] if status else []),
+        )
+        row = cur.fetchone()
+        return {
+            "total":      row["total"] or 0,
+            "publicados": row["publicados"] or 0,
+            "rascunho":   row["rascunho"] or 0,
+            "erro":       row["erro"] or 0,
+            "pausado":    row["pausado"] or 0,
+        }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Kits
+# ---------------------------------------------------------------------------
+
+def criar_kit(nome: str, apostila_ids: list) -> int:
+    """Cria um kit com lista de apostila_ids (JSON) e retorna o id gerado."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO kits (nome, apostila_ids) VALUES (?, ?)",
+            (nome, json.dumps(apostila_ids)),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def listar_kits() -> list:
+    """Retorna todos os kits com contagem de apostilas."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute("SELECT * FROM kits ORDER BY id DESC")
+        rows = [dict(row) for row in cur.fetchall()]
+        for kit in rows:
+            ids = json.loads(kit.get("apostila_ids") or "[]")
+            kit["apostila_count"] = len(ids)
+            kit["apostila_ids_list"] = ids
+        return rows
+    finally:
+        conn.close()
+
+
+def buscar_kit(kit_id: int) -> Optional[dict]:
+    """Retorna um kit pelo id ou None."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute("SELECT * FROM kits WHERE id = ?", (kit_id,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        kit = dict(row)
+        ids = json.loads(kit.get("apostila_ids") or "[]")
+        kit["apostila_count"] = len(ids)
+        kit["apostila_ids_list"] = ids
+        return kit
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Produtos (apostilas com contagem de anúncios)
+# ---------------------------------------------------------------------------
+
+def listar_produtos() -> list:
+    """Retorna apostilas únicas com info do tópico e contagem de anúncios."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            """
+            SELECT
+                ap.id,
+                ap.topico_id,
+                ap.num_exercicios,
+                ap.pdf_path,
+                ap.criado_em,
+                tp.nome AS topico_nome,
+                tp.slug AS topico_slug,
+                COUNT(an.id) AS total_anuncios,
+                SUM(CASE WHEN an.status = 'publicado' THEN 1 ELSE 0 END) AS anuncios_publicados
+            FROM apostilas ap
+            LEFT JOIN topicos tp ON ap.topico_id = tp.id
+            LEFT JOIN anuncios an ON an.apostila_id = ap.id
+            GROUP BY ap.id
+            ORDER BY ap.id DESC
+            """
+        )
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def salvar_ml_tokens(access_token: str, refresh_token: str, expires_at: str) -> None:
+    """Upsert dos tokens do Mercado Livre (sempre id=1)."""
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """INSERT INTO ml_tokens (id, access_token, refresh_token, expires_at)
+               VALUES (1, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                   access_token  = excluded.access_token,
+                   refresh_token = excluded.refresh_token,
+                   expires_at    = excluded.expires_at""",
+            (access_token, refresh_token, expires_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def buscar_ml_tokens() -> Optional[dict]:
+    """Retorna os tokens do Mercado Livre ou None."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute("SELECT * FROM ml_tokens WHERE id = 1")
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Smoke-test: executar diretamente para verificar criação do banco
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    print(f"Criando banco em: {DB_PATH}")
+    criar_tabelas()
+
+    topicos = listar_topicos()
+    print(f"Tópicos inseridos: {len(topicos)}")
+    for t in topicos:
+        print(f"  [{t['id']}] {t['nome']} (slug={t['slug']})")
+
+    # Smoke-test apostila
+    apostila_id = salvar_apostila(topico_id=1, num_exercicios=60, conteudo_json='{"exercicios":[]}')
+    print(f"Apostila criada: id={apostila_id}")
+
+    apostila = buscar_apostila(topico_id=1, num_exercicios=60)
+    print(f"Apostila encontrada: {apostila['id']}")
+
+    # Smoke-test anuncio
+    anuncio_id = criar_anuncio(
+        apostila_id=apostila_id,
+        tipo="digital",
+        template_id=1,
+        titulo="Apostila de Coordenação Motora - 60 exercícios",
+        preco=29.90,
+    )
+    print(f"Anúncio criado: id={anuncio_id}")
+
+    atualizar_anuncio(anuncio_id, status="publicado", ml_id="MLB123456")
+    rascunhos = buscar_anuncios_rascunho()
+    print(f"Rascunhos: {len(rascunhos)}")
+
+    contagem = contar_anuncios()
+    print(f"Contagem: {contagem}")
+
+    # Smoke-test anuncio com variacao/angulo
+    anuncio_var_id = criar_anuncio(
+        apostila_id=apostila_id,
+        tipo="digital",
+        template_id=2,
+        titulo="Apostila de Coordenação Motora - variação beneficio",
+        preco=29.90,
+        variacao=2,
+        angulo="beneficio",
+    )
+    print(f"Anúncio com variacao criado: id={anuncio_var_id}")
+
+    # Smoke-test kits
+    kit_id = criar_kit(nome="Kit Coordenação Completo", apostila_ids=[apostila_id])
+    print(f"Kit criado: id={kit_id}")
+
+    kits = listar_kits()
+    print(f"Kits listados: {len(kits)} — primeiro: {kits[0]['nome']} ({kits[0]['apostila_count']} apostilas)")
+
+    kit = buscar_kit(kit_id)
+    print(f"Kit encontrado: {kit['nome']}, ids={kit['apostila_ids_list']}")
+
+    # Smoke-test anuncio de kit (apostila_id=None)
+    anuncio_kit_id = criar_anuncio(
+        tipo="digital",
+        template_id=1,
+        titulo="Kit Coordenação Completo",
+        preco=59.90,
+        kit_id=kit_id,
+    )
+    print(f"Anúncio de kit criado: id={anuncio_kit_id}")
+
+    # Listar anuncios inclui anuncio de kit (LEFT JOIN)
+    todos = listar_anuncios()
+    print(f"Total anúncios (incl. kit): {len(todos)}")
+
+    kit_anuncios = listar_anuncios(kit_id=kit_id)
+    print(f"Anúncios do kit: {len(kit_anuncios)} — kit_nome={kit_anuncios[0]['kit_nome']}")
+
+    # Smoke-test listar_produtos
+    produtos = listar_produtos()
+    print(f"Produtos listados: {len(produtos)} — primeiro: {produtos[0]['topico_nome']} ({produtos[0]['total_anuncios']} anúncios)")
+
+    # Smoke-test atualizar_anuncio com novos campos
+    atualizar_anuncio(anuncio_var_id, variacao=3, angulo="publico")
+    print("atualizar_anuncio com variacao/angulo: OK")
+
+    # Smoke-test ML tokens
+    salvar_ml_tokens("tok_acc", "tok_ref", "2026-12-31T00:00:00")
+    tokens = buscar_ml_tokens()
+    print(f"ML tokens: access={tokens['access_token']}")
+
+    print("\nOK — banco criado e todas as funções funcionando.")
