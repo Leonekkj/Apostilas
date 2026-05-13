@@ -30,6 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import database
+from ml import client as ml_client
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -356,19 +357,30 @@ async def listar_anuncios(
 
 @app.post("/api/anuncios/{anuncio_id}/publicar")
 async def publicar_anuncio(anuncio_id: int, _auth=Depends(_require_auth)):
-    # Phase 2: ML integration not yet implemented
-    return JSONResponse(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        content={"error": "Integração ML não configurada ainda"},
-    )
+    try:
+        ml_id = await asyncio.to_thread(ml_client.publicar_anuncio, anuncio_id)
+        return {"ml_id": ml_id, "message": "Publicado com sucesso"}
+    except RuntimeError as e:
+        error_msg = str(e)
+        if "não configurado" in error_msg.lower() or "token" in error_msg.lower():
+            raise HTTPException(status_code=503, detail=error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 @app.post("/api/anuncios/publicar-lote")
 async def publicar_lote(_auth=Depends(_require_auth)):
-    return JSONResponse(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        content={"error": "Integração ML não configurada ainda"},
-    )
+    rascunhos = await asyncio.to_thread(database.buscar_anuncios_rascunho, 30)
+    results = []
+    for anuncio in rascunhos:
+        try:
+            ml_id = await asyncio.to_thread(ml_client.publicar_anuncio, anuncio["id"])
+            results.append({"id": anuncio["id"], "ml_id": ml_id, "status": "publicado"})
+        except RuntimeError as e:
+            results.append({"id": anuncio["id"], "error": str(e), "status": "erro"})
+    return {
+        "publicados": len([r for r in results if r["status"] == "publicado"]),
+        "resultados": results
+    }
 
 
 @app.delete("/api/anuncios/{anuncio_id}")

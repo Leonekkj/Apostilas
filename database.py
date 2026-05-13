@@ -424,6 +424,26 @@ def buscar_apostila_por_id(apostila_id: int) -> Optional[dict]:
         conn.close()
 
 
+def buscar_anuncio_por_id(anuncio_id: int) -> Optional[dict]:
+    """Retorna um anúncio pelo id com dados de apostila, tópico e kit."""
+    conn = _get_conn()
+    try:
+        sql = """
+            SELECT an.*, ap.topico_id, ap.num_exercicios, ap.pdf_path,
+                   tp.nome AS topico_nome, tp.slug AS topico_slug, kt.nome AS kit_nome
+            FROM anuncios an
+            LEFT JOIN apostilas ap ON an.apostila_id = ap.id
+            LEFT JOIN topicos tp ON ap.topico_id = tp.id
+            LEFT JOIN kits kt ON an.kit_id = kt.id
+            WHERE an.id = ?
+        """
+        cur = conn.execute(sql, (anuncio_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def listar_produtos() -> list:
     """Retorna apostilas únicas com info do tópico e contagem de anúncios."""
     conn = _get_conn()
