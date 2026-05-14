@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Optional
 
 import requests
+from dotenv import load_dotenv
+load_dotenv()
 
 # Importa modules do diretório pai
 import sys
@@ -17,8 +19,23 @@ ML_API_BASE = "https://api.mercadolibre.com"
 ML_PICTURES_ENDPOINT = f"{ML_API_BASE}/pictures"
 ML_ITEMS_ENDPOINT = f"{ML_API_BASE}/items"
 
-# Environment variables
-ML_CATEGORIA_ID = os.getenv("ML_CATEGORIA_ID", "MLB174")  # livros/apostilas category
+# MLB1196 = Livros e Revistas > Livros (Brasil)
+ML_CATEGORIA_ID = os.getenv("ML_CATEGORIA_ID", "MLB1196")
+
+# Pasta com imagens reais da marca CogniVita (jpg/jpeg/png, até 3 usadas por listing)
+_BRAND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "brand")
+
+
+def _get_brand_images() -> list[str]:
+    """Retorna até 3 caminhos de imagens em assets/brand/, ordenadas por nome."""
+    if not os.path.isdir(_BRAND_DIR):
+        return []
+    exts = {".jpg", ".jpeg", ".png"}
+    files = sorted(
+        f for f in os.listdir(_BRAND_DIR)
+        if os.path.splitext(f)[1].lower() in exts
+    )
+    return [os.path.join(_BRAND_DIR, f) for f in files[:3]]
 
 
 def publicar_anuncio(anuncio_id: int) -> str:
@@ -46,15 +63,30 @@ def publicar_anuncio(anuncio_id: int) -> str:
         raise RuntimeError(f"Token ML não configurado: {e}") from e
 
     try:
-        # 3. Upload cover image if it exists
-        picture_id = None
-        if anuncio.get("imagem_path"):
-            picture_id = _upload_picture(token, anuncio["imagem_path"])
+        # 3. Upload até 3 imagens (variação principal + 2 adjacentes)
+        picture_ids = _upload_pictures(token, anuncio.get("imagem_path", ""))
 
         # 4. Create listing on ML
-        ml_id = _create_listing(token, anuncio, picture_id)
+        ml_id = _create_listing(token, anuncio, picture_ids)
 
-        # 5. Update anuncio with success
+        # 5. Post description (best-effort — não bloqueia se falhar)
+        descricao = anuncio.get("descricao", "")
+        if descricao and ml_id:
+            headers_desc = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            try:
+                requests.post(
+                    f"{ML_ITEMS_ENDPOINT}/{ml_id}/description",
+                    json={"plain_text": descricao},
+                    headers=headers_desc,
+                    timeout=15,
+                )
+            except Exception:
+                pass
+
+        # 6. Update anuncio with success
         now = datetime.utcnow().isoformat()
         database.atualizar_anuncio(
             anuncio_id,
@@ -66,7 +98,7 @@ def publicar_anuncio(anuncio_id: int) -> str:
         return ml_id
 
     except RuntimeError as e:
-        # 6. Update anuncio with error
+        # 7. Update anuncio with error
         database.atualizar_anuncio(
             anuncio_id,
             status="erro",
@@ -75,39 +107,59 @@ def publicar_anuncio(anuncio_id: int) -> str:
         raise
 
 
-def _upload_picture(token: str, imagem_path: str) -> str:
-    """
-    Uploads a cover image to Mercado Livre.
-
-    Args:
-        token: Access token do ML.
-        imagem_path: Caminho local da imagem.
-
-    Returns:
-        str: Picture ID retornado pelo ML.
-
-    Raises:
-        RuntimeError: Se falhar ao fazer upload.
-    """
-    if not os.path.exists(imagem_path):
-        raise RuntimeError(f"Imagem não encontrada: {imagem_path}")
-
+def _upload_single(token: str, imagem_path: str) -> Optional[str]:
+    """Faz upload de uma imagem e retorna o picture_id, ou None se falhar."""
+    if not imagem_path or not os.path.exists(imagem_path):
+        return None
     with open(imagem_path, "rb") as f:
-        files = {"file": f}
-        params = {"access_token": token}
-
-        response = requests.post(ML_PICTURES_ENDPOINT, files=files, params=params)
-
-    if response.status_code != 200:
-        error_data = response.json()
-        error_msg = error_data.get("message", response.text)
-        raise RuntimeError(f"ML API error {response.status_code}: {error_msg}")
-
-    data = response.json()
-    return data.get("id")
+        response = requests.post(ML_PICTURES_ENDPOINT, files={"file": f}, params={"access_token": token})
+    if response.status_code not in (200, 201):
+        return None
+    return response.json().get("id")
 
 
-def _create_listing(token: str, anuncio: dict, picture_id: Optional[str]) -> str:
+def _upload_pictures(token: str, imagem_path: str) -> list[str]:
+    """
+    Faz upload de imagens para o ML. Prioriza imagens reais de assets/brand/;
+    caso a pasta esteja vazia, usa a capa Pillow + até 2 variações adjacentes.
+    Retorna lista de picture_ids (1 a 3 itens).
+    """
+    import re
+    ids = []
+
+    # Imagens reais da marca têm prioridade
+    brand = _get_brand_images()
+    if brand:
+        for path in brand:
+            pid = _upload_single(token, path)
+            if pid:
+                ids.append(pid)
+        return ids
+
+    # Fallback: capa gerada pelo Pillow + 2 variações adjacentes
+    if not imagem_path or not os.path.exists(imagem_path):
+        return ids
+
+    main_id = _upload_single(token, imagem_path)
+    if main_id:
+        ids.append(main_id)
+
+    match = re.search(r'_v(\d+)\.png$', imagem_path)
+    if match:
+        v = int(match.group(1))
+        base = imagem_path[:match.start()]
+        for delta in [1, 2]:
+            next_v = (v - 1 + delta) % 6 + 1
+            next_path = f"{base}_v{next_v}.png"
+            if os.path.exists(next_path):
+                pid = _upload_single(token, next_path)
+                if pid:
+                    ids.append(pid)
+
+    return ids
+
+
+def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     """
     Creates a listing on Mercado Livre.
 
@@ -122,39 +174,32 @@ def _create_listing(token: str, anuncio: dict, picture_id: Optional[str]) -> str
     Raises:
         RuntimeError: Se falhar ao criar listing.
     """
+    titulo = anuncio.get("titulo", "Apostila Cognitiva")
+
     # Build item payload
     payload = {
-        "title": anuncio.get("titulo", ""),
+        "title": titulo,
         "category_id": ML_CATEGORIA_ID,
         "price": float(anuncio.get("preco", 0)),
         "currency_id": "BRL",
-        "available_quantity": 10,
+        "available_quantity": 999,
         "buying_mode": "buy_it_now",
-        "listing_type_id": "gold_special",
+        "listing_type_id": "gold_premium",
         "condition": "new",
-        "description": {
-            "plain_text": f"Apostila digital. {anuncio.get('topico_nome', '')}"
-        },
         "shipping": {
-            "mode": "me2",
-            "free_shipping": False,
+            "free_shipping": True,
         },
+        "attributes": [
+            {"id": "TITLE",     "value_name": titulo[:60]},
+            {"id": "PUBLISHER", "value_name": "CogniVita"},
+            {"id": "BRAND",     "value_name": "CogniVita"},
+            {"id": "FORMAT",    "value_name": "Físico"},
+        ],
     }
 
-    # Add pictures if available
-    if picture_id:
-        payload["pictures"] = [{"id": picture_id}]
-
-    # Add attributes
-    attributes = [
-        {"id": "EDITORIAL", "value_name": "Cognivita"}
-    ]
-    if anuncio.get("topico_nome"):
-        attributes.append({
-            "id": "BOOK_SUBJECT",
-            "value_name": anuncio["topico_nome"]
-        })
-    payload["attributes"] = attributes
+    # Até 3 imagens
+    if picture_ids:
+        payload["pictures"] = [{"id": pid} for pid in picture_ids]
 
     # Make request
     headers = {
@@ -162,15 +207,85 @@ def _create_listing(token: str, anuncio: dict, picture_id: Optional[str]) -> str
         "Content-Type": "application/json",
     }
 
+    import json as _json
+    print("ML PAYLOAD:", _json.dumps(payload, ensure_ascii=False))
     response = requests.post(ML_ITEMS_ENDPOINT, json=payload, headers=headers)
+    print("ML RESPONSE:", response.status_code, response.text[:1000])
 
     if response.status_code != 201:
-        error_data = response.json()
-        error_msg = error_data.get("message", response.text)
+        try:
+            error_data = response.json()
+            error_msg = str(error_data)
+        except Exception:
+            error_msg = response.text
         raise RuntimeError(f"ML API error {response.status_code}: {error_msg}")
 
     data = response.json()
     return data.get("id")
+
+
+def importar_anuncios_ml() -> list[dict]:
+    """
+    Busca todos os anúncios ativos do vendedor no ML e importa para o banco.
+
+    Returns:
+        Lista de dicts com os anúncios importados.
+    """
+    token = auth.get_valid_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Pega o user_id do vendedor
+    me = requests.get(f"{ML_API_BASE}/users/me", headers=headers)
+    if me.status_code != 200:
+        raise RuntimeError(f"Erro ao buscar dados do usuário: {me.text}")
+    user_id = me.json()["id"]
+
+    # 2. Busca todos os item IDs (paginado)
+    item_ids = []
+    offset = 0
+    while True:
+        r = requests.get(
+            f"{ML_API_BASE}/users/{user_id}/items/search",
+            params={"offset": offset, "limit": 50},
+            headers=headers,
+        )
+        if r.status_code != 200:
+            break
+        data = r.json()
+        results = data.get("results", [])
+        item_ids.extend(results)
+        if len(results) < 50:
+            break
+        offset += 50
+
+    if not item_ids:
+        return []
+
+    # 3. Busca detalhes em lote (máx 20 por chamada)
+    importados = []
+    for i in range(0, len(item_ids), 20):
+        batch = item_ids[i:i+20]
+        ids_str = ",".join(batch)
+        r = requests.get(f"{ML_API_BASE}/items", params={"ids": ids_str}, headers=headers)
+        if r.status_code != 200:
+            continue
+        for entry in r.json():
+            item = entry.get("body", {})
+            if not item:
+                continue
+            ml_id = item.get("id", "")
+            titulo = item.get("title", "")
+            preco = float(item.get("price", 0))
+            status_ml = item.get("status", "active")
+            status_local = "publicado" if status_ml == "active" else "pausado"
+            thumbnail = ""
+            pics = item.get("pictures", [])
+            if pics:
+                thumbnail = pics[0].get("url", "")
+            db_id = database.importar_anuncio_externo(ml_id, titulo, preco, status_local, thumbnail)
+            importados.append({"id": db_id, "ml_id": ml_id, "titulo": titulo, "preco": preco, "status": status_local})
+
+    return importados
 
 
 def pausar_anuncio(anuncio_id: int) -> None:
