@@ -119,7 +119,7 @@ Gere todos os {num_exercicios} exercícios no array "exercicios".\
     client = _client()
     response = client.chat.completions.create(
         model=_MODEL,
-        max_tokens=4096,
+        max_tokens=min(int(num_exercicios * 150) + 1000, 10500),
         messages=[
             {"role": "system", "content": _SYSTEM_CONTEUDO},
             {"role": "user", "content": prompt},
@@ -165,59 +165,35 @@ def gerar_titulos_ml(topico: dict, num_exercicios: int) -> list[dict]:
     )
 
     prompt = f"""\
-Crie 6 variações de título para anúncio no Mercado Livre de uma apostila física impressa.
+Crie 6 títulos otimizados para busca no Mercado Livre de uma apostila física impressa.
 
 Produto: Apostila de {nome_topico} com {num_exercicios} exercícios
 Público: idosos 60+, cuidadores, terapeutas ocupacionais
 
-Ângulos (um por variação):
-{angulos_texto}
+Regras obrigatórias:
+- Máximo 60 caracteres por título (conte incluindo espaços)
+- Title Case (primeira letra de cada palavra em maiúscula, exceto preposições curtas)
+- Denso em palavras-chave que compradores digitam no ML
+- Incluir "Para Idosos" em pelo menos 4 dos 6 títulos
+- Variar os termos complementares entre os 6 (Apostila, Exercícios, Atividades, Cognitivo, Memória, Estimulação, Fonte Grande, A4, Impresso, Físico)
+- Sem linguagem promocional (sem: Incrível, Melhor, Oferta, !, ?)
+- Nenhum título pode ser idêntico a outro
 
-Regras para o título:
-- Máximo 60 caracteres
-- Em português do Brasil
-- Incluir palavras-chave relevantes
-- Sem caracteres especiais proibidos pelo ML
+Exemplos do formato desejado para um produto de Memória:
+"Exercícios De Memória Para Idosos Apostila Física"
+"Atividades Cognitivas Para Idosos Envelhecimento Saudável"
+"Apostila Para Idosos Com Fonte Grande E Fácil Leitura"
+"Estimulação Cognitiva Idosos 60 Exercícios Impressos"
 
 Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 
 [
-  {{
-    "variacao": 1,
-    "angulo": "beneficio",
-    "titulo": "...",
-    "descricao": "Descrição de 3 a 4 frases para o corpo do anúncio ML."
-  }},
-  {{
-    "variacao": 2,
-    "angulo": "publico",
-    "titulo": "...",
-    "descricao": "..."
-  }},
-  {{
-    "variacao": 3,
-    "angulo": "quantidade",
-    "titulo": "...",
-    "descricao": "..."
-  }},
-  {{
-    "variacao": 4,
-    "angulo": "aplicacao",
-    "titulo": "...",
-    "descricao": "..."
-  }},
-  {{
-    "variacao": 5,
-    "angulo": "resultado",
-    "titulo": "...",
-    "descricao": "..."
-  }},
-  {{
-    "variacao": 6,
-    "angulo": "formato",
-    "titulo": "...",
-    "descricao": "..."
-  }}
+  {{"variacao": 1, "angulo": "beneficio",   "titulo": "...", "descricao": "Descrição de 3 a 4 frases para o corpo do anúncio ML."}},
+  {{"variacao": 2, "angulo": "publico",     "titulo": "...", "descricao": "..."}},
+  {{"variacao": 3, "angulo": "quantidade",  "titulo": "...", "descricao": "..."}},
+  {{"variacao": 4, "angulo": "aplicacao",   "titulo": "...", "descricao": "..."}},
+  {{"variacao": 5, "angulo": "resultado",   "titulo": "...", "descricao": "..."}},
+  {{"variacao": 6, "angulo": "formato",     "titulo": "...", "descricao": "..."}}
 ]\
 """
 
@@ -243,7 +219,73 @@ Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 
 
 # ---------------------------------------------------------------------------
-# 3. gerar_titulos_kit_ml
+# 3. gerar_descricao_ml
+# ---------------------------------------------------------------------------
+
+def gerar_descricao_ml(topico: dict, num_exercicios: int) -> str:
+    """Gera descrição profissional para anúncio no ML no formato CogniVita."""
+    nome_topico = topico.get("nome", topico.get("name", str(topico)))
+
+    prompt = f"""\
+Crie uma descrição de produto para o Mercado Livre de uma apostila física impressa de estimulação cognitiva.
+
+Produto: Apostila de {nome_topico} com {num_exercicios} exercícios
+Público: idosos 60+, cuidadores, terapeutas ocupacionais
+Marca: CogniVita
+
+Use EXATAMENTE este formato (mantenha os títulos em maiúscula, use • para bullets):
+
+APOSTILA FÍSICA — ESTIMULAÇÃO COGNITIVA PARA IDOSOS
+[1 parágrafo de 2 frases descrevendo o produto e o tópico {nome_topico}]
+
+Indicado para:
+• [uso 1]
+• [uso 2]
+• [uso 3]
+• [uso 4]
+
+O QUE VOCÊ RECEBE
+• Apostila física impressa
+• {num_exercicios} exercícios de {nome_topico}
+• [outro item específico do produto]
+• [outro item específico do produto]
+
+BENEFÍCIOS
+• [benefício 1 relacionado a {nome_topico}]
+• [benefício 2]
+• [benefício 3]
+• [benefício 4]
+
+EXEMPLOS DE ATIVIDADES
+• [atividade 1 específica de {nome_topico}]
+• [atividade 2]
+• [atividade 3]
+• [atividade 4]
+
+ESPECIFICAÇÕES
+• Tipo: Apostila Física Impressa
+• Quantidade: {num_exercicios} atividades
+• Tamanho: A4
+• Impressão: Preto e Branco
+• Fonte: Ampliada (ideal para idosos)
+
+Retorne APENAS o texto acima preenchido, sem JSON, sem markdown, sem comentários.\
+"""
+
+    client = _client()
+    response = client.chat.completions.create(
+        model=_MODEL,
+        max_tokens=600,
+        messages=[
+            {"role": "system", "content": _SYSTEM_TITULOS},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    return response.choices[0].message.content.strip()
+
+
+# ---------------------------------------------------------------------------
+# 4. gerar_titulos_kit_ml
 # ---------------------------------------------------------------------------
 
 def gerar_titulos_kit_ml(
@@ -280,7 +322,7 @@ def gerar_titulos_kit_ml(
     )
 
     prompt = f"""\
-Crie 6 variações de título para anúncio no Mercado Livre de um kit de apostilas físicas impressas.
+Crie 6 títulos otimizados para busca no Mercado Livre de um kit de apostilas físicas impressas.
 
 Kit: {kit_nome}
 Apostilas incluídas: {nomes}
@@ -288,14 +330,18 @@ Total de exercícios: {num_exercicios_total}
 Número de apostilas: {qtd_apostilas}
 Público: idosos 60+, cuidadores, terapeutas ocupacionais
 
-Ângulos (um por variação):
-{angulos_texto}
+Regras obrigatórias:
+- Máximo 60 caracteres por título
+- Title Case
+- Denso em palavras-chave de busca
+- Incluir "Para Idosos" em pelo menos 4 dos 6 títulos
+- Variar: Kit, Combo, Coleção, Apostilas, Exercícios, Cognitivo, Físico, Impresso, Estimulação
+- Sem linguagem promocional (sem: Incrível, Melhor, Oferta, !, ?)
+- Nenhum título idêntico a outro
 
-Regras para o título:
-- Máximo 60 caracteres
-- Em português do Brasil
-- Incluir palavras-chave relevantes
-- Sem caracteres especiais proibidos pelo ML
+Exemplos do formato desejado:
+"Kit Apostilas Para Idosos Estimulação Cognitiva 120 Ex"
+"Combo Atividades Cognitivas Para Idosos Físico Impresso"
 
 Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 
