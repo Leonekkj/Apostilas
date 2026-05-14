@@ -70,9 +70,10 @@ def criar_tabelas() -> None:
         # SQLite does not support FK constraints in ALTER TABLE, so kit_id has no REFERENCES
         # clause here. Integrity is enforced at application level in criar_anuncio().
         for col_name, col_def in [
-            ("variacao", "INTEGER DEFAULT 1"),
-            ("angulo",   "TEXT DEFAULT ''"),
-            ("kit_id",   "INTEGER"),
+            ("variacao",  "INTEGER DEFAULT 1"),
+            ("angulo",    "TEXT DEFAULT ''"),
+            ("kit_id",    "INTEGER"),
+            ("descricao", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE anuncios ADD COLUMN {col_name} {col_def}")
@@ -194,6 +195,7 @@ def criar_anuncio(
     variacao: int = 1,
     angulo: str = "",
     kit_id: Optional[int] = None,
+    descricao: str = "",
 ) -> int:
     """Insere um anúncio com status='rascunho' e retorna o id.
 
@@ -208,9 +210,29 @@ def criar_anuncio(
     try:
         cur = conn.execute(
             """INSERT INTO anuncios
-               (apostila_id, tipo, template_id, titulo, preco, status, variacao, angulo, kit_id)
-               VALUES (?, ?, ?, ?, ?, 'rascunho', ?, ?, ?)""",
-            (apostila_id, tipo, template_id, titulo, preco, variacao, angulo, kit_id),
+               (apostila_id, tipo, template_id, titulo, preco, status, variacao, angulo, kit_id, descricao)
+               VALUES (?, ?, ?, ?, ?, 'rascunho', ?, ?, ?, ?)""",
+            (apostila_id, tipo, template_id, titulo, preco, variacao, angulo, kit_id, descricao),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def importar_anuncio_externo(ml_id: str, titulo: str, preco: float, status: str = "publicado", thumbnail: str = "") -> int:
+    """Insere um anúncio importado do ML (sem apostila_id nem kit_id)."""
+    conn = _get_conn()
+    try:
+        # Verifica se já existe
+        existing = conn.execute("SELECT id FROM anuncios WHERE ml_id = ?", (ml_id,)).fetchone()
+        if existing:
+            return existing[0]
+        cur = conn.execute(
+            """INSERT INTO anuncios
+               (apostila_id, kit_id, tipo, template_id, titulo, preco, status, variacao, angulo, ml_id, imagem_path)
+               VALUES (NULL, NULL, 'importado', 1, ?, ?, ?, 1, 'importado', ?, ?)""",
+            (titulo, preco, status, ml_id, thumbnail),
         )
         conn.commit()
         return cur.lastrowid
@@ -497,6 +519,78 @@ def buscar_ml_tokens() -> Optional[dict]:
         cur = conn.execute("SELECT * FROM ml_tokens WHERE id = 1")
         row = cur.fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Delete helpers
+# ---------------------------------------------------------------------------
+
+def deletar_anuncios_por_apostila(apostila_id: int) -> list:
+    """Marks all non-deleted anuncios of an apostila as 'deletado'.
+    Returns list of ml_ids that had a published listing (for closing on ML)."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT id, ml_id FROM anuncios WHERE apostila_id = ? AND status != 'deletado'",
+            (apostila_id,),
+        )
+        rows = cur.fetchall()
+        ml_ids = [r["ml_id"] for r in rows if r["ml_id"]]
+        ids = [r["id"] for r in rows]
+        if ids:
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(
+                f"UPDATE anuncios SET status = 'deletado' WHERE id IN ({placeholders})",
+                ids,
+            )
+        conn.commit()
+        return ml_ids
+    finally:
+        conn.close()
+
+
+def deletar_apostila(apostila_id: int) -> None:
+    """Hard-deletes an apostila record."""
+    conn = _get_conn()
+    try:
+        conn.execute("DELETE FROM apostilas WHERE id = ?", (apostila_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def deletar_anuncios_por_kit(kit_id: int) -> list:
+    """Marks all non-deleted anuncios of a kit as 'deletado'.
+    Returns list of ml_ids for ML closing."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT id, ml_id FROM anuncios WHERE kit_id = ? AND status != 'deletado'",
+            (kit_id,),
+        )
+        rows = cur.fetchall()
+        ml_ids = [r["ml_id"] for r in rows if r["ml_id"]]
+        ids = [r["id"] for r in rows]
+        if ids:
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(
+                f"UPDATE anuncios SET status = 'deletado' WHERE id IN ({placeholders})",
+                ids,
+            )
+        conn.commit()
+        return ml_ids
+    finally:
+        conn.close()
+
+
+def deletar_kit(kit_id: int) -> None:
+    """Hard-deletes a kit record."""
+    conn = _get_conn()
+    try:
+        conn.execute("DELETE FROM kits WHERE id = ?", (kit_id,))
+        conn.commit()
     finally:
         conn.close()
 

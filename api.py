@@ -407,6 +407,30 @@ async def deletar_anuncio(anuncio_id: int, _auth=Depends(_require_auth)):
     return {"deleted": anuncio_id}
 
 
+@app.delete("/api/produto/{apostila_id}")
+async def deletar_produto(apostila_id: int, _auth=Depends(_require_auth)):
+    ml_ids = await asyncio.to_thread(database.deletar_anuncios_por_apostila, apostila_id)
+    ml_fechados = 0
+    for ml_id in ml_ids:
+        ok = await asyncio.to_thread(ml_client.fechar_anuncio_ml, ml_id)
+        if ok:
+            ml_fechados += 1
+    await asyncio.to_thread(database.deletar_apostila, apostila_id)
+    return {"deleted": apostila_id, "ml_fechados": ml_fechados}
+
+
+@app.delete("/api/kit/{kit_id}")
+async def deletar_kit_endpoint(kit_id: int, _auth=Depends(_require_auth)):
+    ml_ids = await asyncio.to_thread(database.deletar_anuncios_por_kit, kit_id)
+    ml_fechados = 0
+    for ml_id in ml_ids:
+        ok = await asyncio.to_thread(ml_client.fechar_anuncio_ml, ml_id)
+        if ok:
+            ml_fechados += 1
+    await asyncio.to_thread(database.deletar_kit, kit_id)
+    return {"deleted": kit_id, "ml_fechados": ml_fechados}
+
+
 @app.patch("/api/anuncios/{anuncio_id}")
 async def atualizar_anuncio_endpoint(anuncio_id: int, body: AnuncioUpdate, _auth=Depends(_require_auth)):
     updates = {k: v for k, v in body.dict().items() if v is not None}
