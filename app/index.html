@@ -876,6 +876,7 @@
     <div id="tab-anuncios" class="tab-panel">
       <div class="page-header">
         <h2 class="page-title">Anúncios</h2>
+        <button class="btn btn-primary" id="btn-importar" onclick="importarDoML()">↓ Importar do ML</button>
       </div>
       <div class="page-content">
         <div class="filters-bar">
@@ -968,6 +969,11 @@
           <option value="120">120 exercícios — R$ 39,90</option>
           <option value="150">150 exercícios — R$ 44,90</option>
         </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Preço (R$)</label>
+        <input type="number" class="form-control" id="produto-preco" step="0.01" min="0.01" placeholder="Ex: 29,90" />
+        <div style="font-size:12px;color:var(--muted);margin-top:4px;">Deixe em branco para usar o preço padrão da quantidade de exercícios</div>
       </div>
       <div id="produto-msg" style="font-size:13px;color:var(--muted);margin-top:-8px;"></div>
     </div>
@@ -1170,7 +1176,7 @@ function renderProdutos(list) {
       ? `<img class="card-thumb" src="${imgSrc}" alt="capa" onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>📚</div>'">`
       : `<div class="card-thumb-placeholder">📚</div>`;
     return `
-      <div class="card">
+      <div class="card" id="produto-card-${p.id}">
         ${thumb}
         <div class="card-body">
           <div class="card-title">${esc(p.topico_nome || 'Apostila')}</div>
@@ -1180,6 +1186,12 @@ function renderProdutos(list) {
             <div class="progress-label">
               <span>${pub}</span> publicados &nbsp;·&nbsp; <span>${total - pub}</span> rascunhos
             </div>
+          </div>
+          <div style="margin-top:8px;text-align:right;">
+            <button class="btn btn-sm" style="background:transparent;color:var(--error);border:1px solid var(--error);"
+              onclick="deletarProduto(${p.id}, this)" title="Excluir produto e fechar anúncios no ML">
+              Excluir
+            </button>
           </div>
         </div>
       </div>`;
@@ -1210,10 +1222,18 @@ async function loadTopicos() {
 async function gerarProduto() {
   const topicoId = parseInt(document.getElementById('produto-topico').value);
   const numEx    = parseInt(document.getElementById('produto-exercicios').value);
+  const precoRaw = document.getElementById('produto-preco').value;
   const msg      = document.getElementById('produto-msg');
   const btn      = document.getElementById('btn-gerar-produto');
 
   if (!topicoId) { showToast('Selecione um tópico', 'error'); return; }
+
+  const body = { topico_id: topicoId, num_exercicios: numEx };
+  if (precoRaw) {
+    const preco = parseFloat(precoRaw.replace(',', '.'));
+    if (isNaN(preco) || preco <= 0) { showToast('Preço inválido', 'error'); return; }
+    body.preco = preco;
+  }
 
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Gerando…';
@@ -1222,7 +1242,7 @@ async function gerarProduto() {
   try {
     const res = await apiFetch('/api/produto', {
       method: 'POST',
-      body: JSON.stringify({ topico_id: topicoId, num_exercicios: numEx }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
@@ -1280,7 +1300,7 @@ function renderKits(list) {
       return sum + (p ? (p.num_exercicios || 0) : 0);
     }, 0);
     return `
-      <div class="card">
+      <div class="card" id="kit-card-${k.id}">
         <div class="kit-thumbs">${thumbsHtml}</div>
         <div class="card-body">
           <div class="card-title">${esc(k.nome || 'Kit')}</div>
@@ -1289,6 +1309,12 @@ function renderKits(list) {
             <div class="progress-label">
               <span>${k.apostila_count || ids.length}</span> apostila${(k.apostila_count || ids.length) !== 1 ? 's' : ''} no kit
             </div>
+          </div>
+          <div style="margin-top:8px;text-align:right;">
+            <button class="btn btn-sm" style="background:transparent;color:var(--error);border:1px solid var(--error);"
+              onclick="deletarKit(${k.id}, this)" title="Excluir kit e fechar anúncios no ML">
+              Excluir
+            </button>
           </div>
         </div>
       </div>`;
@@ -1390,7 +1416,10 @@ function renderAnuncios(list) {
       ? `<div class="td-thumb"><img src="${imgSrc}" alt="" onerror="this.parentElement.innerHTML='📋'"></div>`
       : `<div class="td-thumb">📋</div>`;
     const nomeProduto = a.topico_nome || a.kit_nome || `#${a.apostila_id || a.kit_id || '—'}`;
-    const preco = a.preco != null ? `R$ ${parseFloat(a.preco).toFixed(2).replace('.', ',')}` : '—';
+    const precoVal = a.preco != null ? parseFloat(a.preco).toFixed(2) : null;
+    const preco = precoVal != null
+      ? `<span style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;" title="Clique para editar" onclick="editarPreco(${a.id}, this, ${precoVal})">R$ ${precoVal.replace('.', ',')}</span>`
+      : '—';
     const badgeClass = {
       rascunho: 'badge-rascunho',
       publicado: 'badge-publicado',
@@ -1402,6 +1431,10 @@ function renderAnuncios(list) {
     const publishBtn = a.status !== 'publicado'
       ? `<button class="btn btn-sm btn-primary" onclick="publicarAnuncio(${a.id}, this)">Publicar</button>`
       : `<span style="color:var(--muted);font-size:12px;">—</span>`;
+    const mlLink = a.ml_id
+      ? `<a href="https://produto.mercadolivre.com.br/${a.ml_id}" target="_blank" class="btn btn-sm" style="font-size:11px;border:1px solid var(--border);background:transparent;">ML ↗</a>`
+      : '';
+    const deleteBtn = `<button class="btn btn-sm" style="color:var(--error,#c0392b);border:1px solid currentColor;background:transparent;padding:2px 8px;font-size:14px;line-height:1;" onclick="deletarAnuncio(${a.id}, this)" title="Excluir">×</button>`;
 
     return `
       <tr id="anuncio-row-${a.id}">
@@ -1412,7 +1445,7 @@ function renderAnuncios(list) {
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px;">${a.variacao ?? '—'}</td>
         <td class="price-mono">${preco}</td>
         <td><span class="badge ${badgeClass}">${a.status || 'rascunho'}</span></td>
-        <td>${publishBtn}</td>
+        <td style="white-space:nowrap;display:flex;gap:4px;align-items:center;">${publishBtn}${mlLink}${deleteBtn}</td>
       </tr>`;
   }).join('');
 }
@@ -1445,6 +1478,105 @@ async function publicarAnuncio(id, btn) {
   }
 }
 
+async function importarDoML() {
+  const btn = document.getElementById('btn-importar');
+  btn.disabled = true;
+  btn.textContent = 'Importando…';
+  try {
+    const res = await apiFetch('/api/ml/importar', { method: 'POST' });
+    if (res.status === 503) {
+      const d = await res.json().catch(() => ({}));
+      showToast(d.detail || 'ML não conectado. Conecte o ML primeiro.', 'warning');
+    } else if (res.ok) {
+      const d = await res.json();
+      showToast(`${d.importados} anúncio(s) importado(s) do ML`, 'success');
+      loadAnuncios();
+    } else {
+      showToast('Erro ao importar', 'error');
+    }
+  } catch (e) {
+    showToast(`Erro: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↓ Importar do ML';
+  }
+}
+
+async function deletarAnuncio(id, btn) {
+  if (!confirm('Excluir este anúncio?')) return;
+  btn.disabled = true;
+  try {
+    const res = await apiFetch(`/api/anuncios/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      const row = document.getElementById(`anuncio-row-${id}`);
+      if (row) row.remove();
+      showToast('Anúncio excluído', 'success');
+    } else {
+      btn.disabled = false;
+      showToast('Erro ao excluir', 'error');
+    }
+  } catch (e) {
+    btn.disabled = false;
+    showToast(`Erro: ${e.message}`, 'error');
+  }
+}
+
+async function deletarProduto(id, btn) {
+  if (!confirm('Excluir este produto? Todos os anúncios vinculados serão fechados no Mercado Livre. Esta ação não pode ser desfeita.')) return;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const res = await apiFetch(`/api/produto/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const card = document.getElementById(`produto-card-${id}`);
+    if (card) card.remove();
+    showToast(`Produto excluído. ${data.ml_fechados || 0} anúncio(s) fechado(s) no ML.`, 'success');
+    await loadStats();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Excluir';
+    showToast(`Erro ao excluir produto: ${e.message}`, 'error');
+  }
+}
+
+async function deletarKit(id, btn) {
+  if (!confirm('Excluir este kit? Todos os anúncios vinculados serão fechados no Mercado Livre. Esta ação não pode ser desfeita.')) return;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const res = await apiFetch(`/api/kit/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const card = document.getElementById(`kit-card-${id}`);
+    if (card) card.remove();
+    showToast(`Kit excluído. ${data.ml_fechados || 0} anúncio(s) fechado(s) no ML.`, 'success');
+    await loadStats();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Excluir';
+    showToast(`Erro ao excluir kit: ${e.message}`, 'error');
+  }
+}
+
+async function editarPreco(id, el, precoAtual) {
+  const novo = prompt('Novo preço (ex: 34,90):', String(precoAtual).replace('.', ','));
+  if (novo === null) return;
+  const preco = parseFloat(novo.replace(',', '.'));
+  if (isNaN(preco) || preco <= 0) { alert('Preço inválido'); return; }
+  const res = await apiFetch(`/api/anuncios/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preco }),
+  });
+  if (res.ok) {
+    el.textContent = `R$ ${preco.toFixed(2).replace('.', ',')}`;
+    showToast('Preço atualizado', 'success');
+  } else {
+    showToast('Erro ao atualizar preço', 'error');
+  }
+}
+
 // ─────────────────────────────────────────────
 // ML Status
 // ─────────────────────────────────────────────
@@ -1468,12 +1600,16 @@ async function loadMlStatus() {
 
 async function handleMlClick() {
   try {
-    const res = await fetch(`${API_BASE}/api/ml/auth`);
-    if (res.status === 501) {
-      showToast('Integração ML em breve', 'warning');
+    const res = await apiFetch('/api/ml/auth');
+    if (res.status === 503) {
+      const d = await res.json().catch(() => ({}));
+      showToast(d.detail || 'Configure ML_CLIENT_ID no servidor', 'warning');
     } else if (res.ok) {
       const d = await res.json();
-      if (d.url) window.open(d.url, '_blank');
+      const url = d.auth_url || d.url;
+      if (url) window.location.href = url;
+    } else {
+      showToast('Erro ao conectar com ML', 'error');
     }
   } catch {
     showToast('Erro ao verificar ML', 'error');
