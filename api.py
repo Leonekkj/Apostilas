@@ -22,6 +22,9 @@ import asyncio
 import os
 from typing import Optional
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import Depends, FastAPI, HTTPException, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -104,11 +107,17 @@ def _get_preco(num_exercicios: int) -> float:
 class ProdutoRequest(BaseModel):
     topico_id: int
     num_exercicios: int = Field(default=60, ge=1, le=150)
+    preco: Optional[float] = None
 
 
 class KitRequest(BaseModel):
     apostila_ids: list[int]
     nome: Optional[str] = None
+
+
+class AnuncioUpdate(BaseModel):
+    preco: Optional[float] = None
+    titulo: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +184,7 @@ async def criar_produto(body: ProdutoRequest, _auth=Depends(_require_auth)):
         raise HTTPException(status_code=404, detail=f"Tópico {body.topico_id} não encontrado")
 
     num = body.num_exercicios
-    preco = _get_preco(num)
+    preco = body.preco if body.preco is not None else _get_preco(num)
 
     generated_files: list[str] = []
     try:
@@ -198,16 +207,18 @@ async def criar_produto(body: ProdutoRequest, _auth=Depends(_require_auth)):
         # 5. Update PDF path
         await asyncio.to_thread(database.atualizar_pdf_apostila, apostila_id, pdf_path)
 
-        # 6. Generate 6 ML titles
+        # 6. Generate 6 ML titles + description
         titulos = await asyncio.to_thread(content.gerar_titulos_ml, topico, num)
+        descricao = await asyncio.to_thread(content.gerar_descricao_ml, topico, num)
 
         anuncios_result = []
 
         # 7. For each of 6 title variants
         for i, title in enumerate(titulos):
+            variacao = i + 1  # paletas vão de 1 a 6
             # a. Generate cover image
             image_paths = await asyncio.to_thread(
-                images.gerar_capas, apostila_id, topico, num, i
+                images.gerar_capas, apostila_id, topico, num, variacao
             )
             generated_files.extend(image_paths)
             image_path = image_paths[0] if image_paths else None
@@ -215,7 +226,8 @@ async def criar_produto(body: ProdutoRequest, _auth=Depends(_require_auth)):
             # b. Create anuncio record
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,
-                apostila_id, "fisico", i, title["titulo"], preco, i, title.get("angulo", ""),
+                apostila_id, "fisico", variacao, title["titulo"], preco, variacao, title.get("angulo", ""),
+                None, descricao,
             )
 
             # c. Update image path
@@ -228,7 +240,7 @@ async def criar_produto(body: ProdutoRequest, _auth=Depends(_require_auth)):
                 "anuncio_id": anuncio_id,
                 "titulo": title["titulo"],
                 "angulo": title.get("angulo", ""),
-                "variacao": i,
+                "variacao": variacao,
                 "imagem_path": image_path,
                 "preco": preco,
             })
@@ -285,10 +297,12 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
         preco_individual = sum(_get_preco(ap.get("num_exercicios", 60)) for ap in apostilas)
         preco_kit = round(preco_individual * 0.85, 2)
 
-        # Generate 6 ML titles for kit
+        # Generate 6 ML titles + description for kit
         titulos = await asyncio.to_thread(
             content.gerar_titulos_kit_ml, nome, apostilas, total_exercicios
         )
+        topico_kit = {"nome": nome}
+        descricao_kit = await asyncio.to_thread(content.gerar_descricao_ml, topico_kit, total_exercicios)
 
         anuncios_result = []
 
@@ -303,6 +317,7 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,
                 None, "fisico", i, title["titulo"], preco_kit, i, title.get("angulo", ""), kit_id,
+                descricao_kit,
             )
 
             if image_path:
@@ -385,13 +400,34 @@ async def publicar_lote(_auth=Depends(_require_auth)):
 
 @app.delete("/api/anuncios/{anuncio_id}")
 async def deletar_anuncio(anuncio_id: int, _auth=Depends(_require_auth)):
+    anuncio = await asyncio.to_thread(database.buscar_anuncio_por_id, anuncio_id)
+    if anuncio and anuncio.get("ml_id"):
+        await asyncio.to_thread(ml_client.fechar_anuncio_ml, anuncio["ml_id"])
     await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, status="deletado")
     return {"deleted": anuncio_id}
+
+
+@app.patch("/api/anuncios/{anuncio_id}")
+async def atualizar_anuncio_endpoint(anuncio_id: int, body: AnuncioUpdate, _auth=Depends(_require_auth)):
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar")
+    await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, **updates)
+    return {"updated": anuncio_id}
 
 
 # ---------------------------------------------------------------------------
 # ML OAuth (no auth required)
 # ---------------------------------------------------------------------------
+
+@app.post("/api/ml/importar")
+async def importar_do_ml(_auth=Depends(_require_auth)):
+    try:
+        importados = await asyncio.to_thread(ml_client.importar_anuncios_ml)
+        return {"importados": len(importados), "anuncios": importados}
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
 
 @app.get("/api/ml/status")
 async def ml_status():
@@ -403,18 +439,26 @@ async def ml_status():
 
 @app.get("/api/ml/auth")
 async def ml_auth():
-    return JSONResponse(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        content={"error": "ML não configurado ainda"},
-    )
+    if not os.getenv("ML_CLIENT_ID"):
+        raise HTTPException(status_code=503, detail="ML_CLIENT_ID não configurado no servidor")
+    from ml import auth as ml_auth_module
+    url = ml_auth_module.get_auth_url()
+    return {"auth_url": url}
 
 
 @app.get("/api/ml/callback")
-async def ml_callback():
-    return JSONResponse(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        content={"error": "ML não configurado ainda"},
-    )
+async def ml_callback(code: str):
+    try:
+        from ml import auth as ml_auth_module
+        from datetime import datetime, timedelta
+        from fastapi.responses import RedirectResponse
+        tokens = await asyncio.to_thread(ml_auth_module.exchange_code, code)
+        expires_at = (datetime.utcnow() + timedelta(seconds=tokens["expires_in"])).isoformat()
+        await asyncio.to_thread(database.salvar_ml_tokens,
+            tokens["access_token"], tokens["refresh_token"], expires_at)
+        return RedirectResponse(url="/?ml=conectado")
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ---------------------------------------------------------------------------

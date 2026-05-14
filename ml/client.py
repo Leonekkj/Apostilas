@@ -330,3 +330,29 @@ def pausar_anuncio(anuncio_id: int) -> None:
 
     # Update status locally
     database.atualizar_anuncio(anuncio_id, status="pausado")
+
+
+def fechar_anuncio_ml(ml_id: str) -> bool:
+    """Closes an ML listing permanently. Returns True on success, False on failure (non-blocking)."""
+    if not ml_id:
+        return False
+    try:
+        token = auth.get_valid_token()
+    except RuntimeError:
+        return False
+
+    endpoint = f"{ML_ITEMS_ENDPOINT}/{ml_id}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    response = requests.put(endpoint, json={"status": "closed"}, headers=headers)
+
+    if response.status_code != 200:
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            "Falha ao fechar anúncio ML %s: %s %s",
+            ml_id, response.status_code, response.text[:200]
+        )
+        return False
+    return True
