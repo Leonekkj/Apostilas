@@ -64,6 +64,17 @@ def criar_tabelas() -> None:
                 apostila_ids TEXT NOT NULL,
                 criado_em    TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS vendas (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                ml_order_id         TEXT UNIQUE NOT NULL,
+                anuncio_id          INTEGER REFERENCES anuncios(id),
+                comprador_nickname  TEXT DEFAULT '',
+                valor               REAL DEFAULT 0.0,
+                quantidade          INTEGER DEFAULT 1,
+                data_venda          TEXT,
+                sincronizado_em     TEXT DEFAULT (datetime('now'))
+            );
         """)
 
         # Migration: add new columns to anuncios (SQLite workaround for ADD COLUMN IF NOT EXISTS).
@@ -311,7 +322,7 @@ def atualizar_anuncio(anuncio_id: int, **kwargs) -> None:
     campos_permitidos = {
         "status", "ml_id", "imagem_path", "erro_msg",
         "publicado_em", "titulo", "preco", "template_id",
-        "variacao", "angulo", "kit_id",
+        "variacao", "angulo", "kit_id", "apostila_id",
     }
     campos = {k: v for k, v in kwargs.items() if k in campos_permitidos}
     if not campos:
@@ -552,9 +563,10 @@ def deletar_anuncios_por_apostila(apostila_id: int) -> list:
 
 
 def deletar_apostila(apostila_id: int) -> None:
-    """Hard-deletes an apostila record."""
+    """Hard-deletes an apostila and its anuncio rows."""
     conn = _get_conn()
     try:
+        conn.execute("DELETE FROM anuncios WHERE apostila_id = ?", (apostila_id,))
         conn.execute("DELETE FROM apostilas WHERE id = ?", (apostila_id,))
         conn.commit()
     finally:
@@ -586,11 +598,132 @@ def deletar_anuncios_por_kit(kit_id: int) -> list:
 
 
 def deletar_kit(kit_id: int) -> None:
-    """Hard-deletes a kit record."""
+    """Hard-deletes a kit and its anuncio rows."""
     conn = _get_conn()
     try:
+        conn.execute("DELETE FROM anuncios WHERE kit_id = ?", (kit_id,))
         conn.execute("DELETE FROM kits WHERE id = ?", (kit_id,))
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Vendas
+# ---------------------------------------------------------------------------
+
+def buscar_anuncio_id_por_ml_id(ml_id: str) -> Optional[int]:
+    """Retorna o id do anúncio com o ml_id informado, ou None se não encontrado."""
+    conn = _get_conn()
+    try:
+        row = conn.execute("SELECT id FROM anuncios WHERE ml_id = ?", (ml_id,)).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def salvar_venda(
+    ml_order_id: str,
+    anuncio_id: Optional[int],
+    comprador_nickname: str,
+    valor: float,
+    quantidade: int,
+    data_venda: str,
+) -> None:
+    """Upsert de uma venda pelo ml_order_id (não cria duplicatas)."""
+    conn = _get_conn()
+    try:
+        conn.execute(
+            """INSERT INTO vendas
+               (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(ml_order_id) DO UPDATE SET
+                 anuncio_id=excluded.anuncio_id,
+                 comprador_nickname=excluded.comprador_nickname,
+                 valor=excluded.valor,
+                 quantidade=excluded.quantidade,
+                 data_venda=excluded.data_venda,
+                 sincronizado_em=datetime('now')""",
+            (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def listar_vendas(
+    apostila_id: Optional[int] = None,
+    anuncio_id: Optional[int] = None,
+) -> list[dict]:
+    """Lista vendas com JOIN em anuncios, apostilas e topicos."""
+    conn = _get_conn()
+    try:
+        sql = """
+            SELECT
+                v.*,
+                an.titulo  AS anuncio_titulo,
+                an.ml_id   AS anuncio_ml_id,
+                tp.nome    AS topico_nome,
+                ap.num_exercicios
+            FROM vendas v
+            LEFT JOIN anuncios  an ON v.anuncio_id   = an.id
+            LEFT JOIN apostilas ap ON an.apostila_id  = ap.id
+            LEFT JOIN topicos   tp ON ap.topico_id    = tp.id
+            WHERE 1=1
+        """
+        params: list = []
+        if apostila_id is not None:
+            sql += " AND an.apostila_id = ?"
+            params.append(apostila_id)
+        if anuncio_id is not None:
+            sql += " AND v.anuncio_id = ?"
+            params.append(anuncio_id)
+        sql += " ORDER BY v.data_venda DESC"
+        cur = conn.execute(sql, params)
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def resumo_vendas_por_apostila() -> list[dict]:
+    """Agrega vendas por apostila: total de vendas e faturamento.
+
+    Vendas com anuncio_id=NULL (listing não importado) ou anúncio sem
+    apostila_id linkada são intencionalmente excluídas — não podem ser
+    atribuídas a uma apostila específica.
+    """
+    conn = _get_conn()
+    try:
+        cur = conn.execute("""
+            SELECT
+                ap.id                          AS apostila_id,
+                tp.nome                        AS topico_nome,
+                ap.num_exercicios,
+                COUNT(v.id)                    AS total_vendas,
+                SUM(v.valor * v.quantidade)    AS faturamento
+            FROM vendas v
+            JOIN anuncios  an ON v.anuncio_id  = an.id
+            JOIN apostilas ap ON an.apostila_id = ap.id
+            JOIN topicos   tp ON ap.topico_id   = tp.id
+            GROUP BY ap.id, tp.nome, ap.num_exercicios
+            ORDER BY total_vendas DESC
+        """)
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def listar_todas_apostilas() -> list[dict]:
+    """Retorna todas as apostilas com nome do tópico (para o dropdown de link)."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute("""
+            SELECT ap.id, ap.num_exercicios, tp.nome AS topico_nome
+            FROM apostilas ap
+            JOIN topicos tp ON ap.topico_id = tp.id
+            ORDER BY tp.nome, ap.num_exercicios
+        """)
+        return [dict(row) for row in cur.fetchall()]
     finally:
         conn.close()
 
