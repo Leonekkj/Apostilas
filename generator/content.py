@@ -14,6 +14,9 @@ import os
 
 from groq import Groq
 
+FATIAS = [30, 60, 90, 120, 150, 200]
+PRECOS_FATIA = {30: 14.90, 60: 19.90, 90: 24.90, 120: 29.90, 150: 34.90, 200: 44.90}
+
 # ---------------------------------------------------------------------------
 # Cliente (lazy-initialized so the module can be imported without a key)
 # ---------------------------------------------------------------------------
@@ -119,7 +122,7 @@ Gere todos os {num_exercicios} exercícios no array "exercicios".\
     client = _client()
     response = client.chat.completions.create(
         model=_MODEL,
-        max_tokens=min(int(num_exercicios * 150) + 1000, 10500),
+        max_tokens=min(int(num_exercicios * 150) + 1000, 8000),
         messages=[
             {"role": "system", "content": _SYSTEM_CONTEUDO},
             {"role": "user", "content": prompt},
@@ -420,6 +423,39 @@ Retorne SOMENTE o nome, sem aspas, sem ponto final, sem explicação.\
 
     nome = response.choices[0].message.content.strip().strip('"').strip("'").rstrip(".")
     return nome
+
+
+# ---------------------------------------------------------------------------
+# 5. fatiar_conteudo
+# ---------------------------------------------------------------------------
+
+def fatiar_conteudo(conteudo_json: str, n: int) -> str:
+    """Retorna JSON com os primeiros N exercícios do conteúdo completo."""
+    data = json.loads(conteudo_json)
+    data["exercicios"] = data.get("exercicios", [])[:n]
+    data["num_exercicios"] = len(data["exercicios"])
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# 6. gerar_titulo_apostila_produto
+# ---------------------------------------------------------------------------
+
+def gerar_titulo_apostila_produto(nome_produto: str, num_exercicios: int) -> str:
+    """Gera 1 título ML otimizado para uma apostila dentro de uma linha de produto."""
+    prompt = f"""\
+Crie 1 título otimizado para Mercado Livre de apostila física impressa.
+Linha: {nome_produto} | Exercícios: {num_exercicios} | Público: idosos 60+
+
+Formato obrigatório (máx 60 chars): "{nome_produto} — {num_exercicios} Exercícios | [complemento]"
+Complemento deve mencionar idosos. Varie: Apostila Física, Estimulação Cognitiva, etc.
+Retorne SOMENTE o título, sem aspas, sem explicação."""
+    client = _client()
+    response = client.chat.completions.create(
+        model=_MODEL, max_tokens=80,
+        messages=[{"role": "system", "content": _SYSTEM_TITULOS}, {"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content.strip().strip('"').rstrip(".")
 
 
 # ---------------------------------------------------------------------------
