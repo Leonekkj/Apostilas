@@ -923,6 +923,19 @@
       font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
     }
     .pedidos-table td { padding: 10px 6px; border-bottom: 1px solid var(--card-border); }
+
+    /* ── Produto Linha Cards ── */
+    .produto-linha-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .produto-linha-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .produto-linha-card-meta { color: var(--muted); font-size: 0.85em; margin-bottom: 8px; }
+    .produto-linha-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 0.85em; }
+    .modal-info { font-size: 0.85em; color: var(--muted); margin-bottom: 12px; }
   </style>
 </head>
 <body>
@@ -973,7 +986,10 @@
     <div id="tab-produtos" class="tab-panel active">
       <div class="page-header">
         <h2 class="page-title">Produtos</h2>
-        <button class="btn btn-primary" onclick="openModal('produto-modal')">+ Novo Produto</button>
+        <div style="display:flex;gap:10px;">
+          <button class="btn btn-primary" onclick="abrirModalLinhaProduto()">+ Nova Linha de Produto</button>
+          <button class="btn btn-ghost" onclick="openModal('produto-modal')">+ Apostila Avulsa</button>
+        </div>
       </div>
       <div class="page-content">
         <div class="stats-bar" id="stats-bar">
@@ -1114,6 +1130,38 @@
 </div>
 
 <!-- ═══════════════════════════════════════════
+     LINHA DE PRODUTO MODAL
+═══════════════════════════════════════════ -->
+<div class="modal-backdrop" id="linha-produto-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 class="modal-title">Nova Linha de Produto</h3>
+      <button class="modal-close" onclick="closeModal('linha-produto-modal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-info">Serão gerados 200 exercícios → 6 apostilas (30, 60, 90, 120, 150, 200 exercícios) · R$ 14,90 a R$ 44,90</p>
+      <div class="form-group">
+        <label class="form-label">Nome da linha</label>
+        <input id="linha-produto-nome" type="text" class="form-control" placeholder="ex: Raciocínio Lógico Cognivita" maxlength="120">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tópico</label>
+        <select id="linha-produto-topico" class="form-control"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Série</label>
+        <input id="linha-produto-serie" type="number" class="form-control" value="1" min="1" max="99">
+      </div>
+      <div id="linha-produto-msg" style="font-size:13px;color:var(--muted);margin-top:-8px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('linha-produto-modal')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-gerar-linha" onclick="gerarLinhaProduto()">Gerar Linha</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
      PRODUTO MODAL
 ═══════════════════════════════════════════ -->
 <div class="modal-backdrop" id="produto-modal">
@@ -1203,6 +1251,7 @@ let _activeStatusFilter = '';
 let _produtos = [];
 let _kits = [];
 let _mlAuthUrl = null;
+let _topicos = [];
 
 // ─────────────────────────────────────────────
 // Auth helpers
@@ -1244,6 +1293,7 @@ function switchTab(name) {
   document.querySelector(`.nav-item[data-tab="${name}"]`).classList.add('active');
   window.location.hash = name;
 
+  if (name === 'produtos') loadProdutos();
   if (name === 'anuncios') loadAnuncios();
   if (name === 'kits') loadKits();
   if (name === 'vendas') loadVendasResumo();
@@ -1378,6 +1428,7 @@ async function loadTopicos() {
     const res = await apiFetch('/api/topicos');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const topicos = await res.json();
+    _topicos = topicos;
     if (!topicos.length) {
       sel.innerHTML = '<option value="">Nenhum tópico disponível</option>';
       return;
@@ -1427,6 +1478,70 @@ async function gerarProduto() {
   } finally {
     btn.disabled = false;
     btn.innerHTML = 'Gerar Produto';
+    msg.textContent = '';
+  }
+}
+
+// ─────────────────────────────────────────────
+// Linha de Produto (200 exercícios → 6 apostilas)
+// ─────────────────────────────────────────────
+async function abrirModalLinhaProduto() {
+  const sel = document.getElementById('linha-produto-topico');
+  if (_topicos.length) {
+    sel.innerHTML = _topicos.map(t => `<option value="${t.id}">${esc(t.nome)}</option>`).join('');
+  } else {
+    sel.innerHTML = '<option value="">Carregando…</option>';
+    try {
+      const res = await apiFetch('/api/topicos');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      _topicos = await res.json();
+      sel.innerHTML = _topicos.length
+        ? _topicos.map(t => `<option value="${t.id}">${esc(t.nome)}</option>`).join('')
+        : '<option value="">Nenhum tópico disponível</option>';
+    } catch (e) {
+      sel.innerHTML = '<option value="">Erro ao carregar tópicos</option>';
+    }
+  }
+  document.getElementById('linha-produto-nome').value = '';
+  document.getElementById('linha-produto-serie').value = '1';
+  document.getElementById('linha-produto-msg').textContent = '';
+  document.getElementById('btn-gerar-linha').disabled = false;
+  document.getElementById('btn-gerar-linha').innerHTML = 'Gerar Linha';
+  openModal('linha-produto-modal');
+}
+
+async function gerarLinhaProduto() {
+  const nome     = document.getElementById('linha-produto-nome').value.trim();
+  const topicoId = parseInt(document.getElementById('linha-produto-topico').value);
+  const serie    = parseInt(document.getElementById('linha-produto-serie').value) || 1;
+  const msg      = document.getElementById('linha-produto-msg');
+  const btn      = document.getElementById('btn-gerar-linha');
+
+  if (!nome)     { showToast('Informe o nome da linha', 'error'); return; }
+  if (!topicoId) { showToast('Selecione um tópico', 'error'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Gerando…';
+  msg.textContent = 'Gerando 200 exercícios e 6 apostilas. Isso pode levar 4–6 minutos…';
+
+  try {
+    const res = await apiFetch('/api/produto', {
+      method: 'POST',
+      body: JSON.stringify({ nome, topico_id: topicoId, serie }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+    showToast(`Linha "${data.nome}" criada com ${data.apostilas?.length || 0} apostilas!`, 'success');
+    closeModal('linha-produto-modal');
+    await loadProdutos();
+    await loadStats();
+  } catch (e) {
+    msg.textContent = '';
+    showToast(`Erro ao gerar linha: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Gerar Linha';
     msg.textContent = '';
   }
 }
@@ -1497,11 +1612,28 @@ function populateKitApostilas() {
     list.innerHTML = '<span style="color:var(--muted);font-size:13px;padding:4px;">Nenhum produto disponível. Crie um produto primeiro.</span>';
     return;
   }
-  list.innerHTML = _produtos.map(p => `
-    <label class="checkbox-item">
-      <input type="checkbox" value="${p.id}" />
-      <span>${esc(p.topico_nome || 'Apostila')} — ${p.num_exercicios || 60} ex</span>
-    </label>`).join('');
+  // Support both flat apostilas (legacy) and nested linha structure
+  const hasNested = _produtos.some(p => Array.isArray(p.apostilas) && p.apostilas.length);
+  if (hasNested) {
+    const apostilas = _produtos.flatMap(p =>
+      (p.apostilas || []).map(a => ({ ...a, produto_nome: p.nome || p.topico_nome || 'Produto' }))
+    );
+    if (!apostilas.length) {
+      list.innerHTML = '<span style="color:var(--muted);font-size:13px;padding:4px;">Nenhuma apostila disponível.</span>';
+      return;
+    }
+    list.innerHTML = apostilas.map(a => `
+      <label class="checkbox-item">
+        <input type="checkbox" value="${a.id}" />
+        <span>${esc(a.produto_nome)} — ${a.num_exercicios || 60} ex</span>
+      </label>`).join('');
+  } else {
+    list.innerHTML = _produtos.map(p => `
+      <label class="checkbox-item">
+        <input type="checkbox" value="${p.id}" />
+        <span>${esc(p.topico_nome || 'Apostila')} — ${p.num_exercicios || 60} ex</span>
+      </label>`).join('');
+  }
 }
 
 async function criarKit() {
