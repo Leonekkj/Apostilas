@@ -89,6 +89,10 @@ def _require_auth(
 # Price table
 # ---------------------------------------------------------------------------
 
+_FATIAS = [30, 60, 90, 120, 150, 200]
+_PRECOS_PRODUTO = {30: 14.90, 60: 19.90, 90: 24.90, 120: 29.90, 150: 34.90, 200: 44.90}
+
+
 def _get_preco(num_exercicios: int) -> float:
     defaults = {60: 29.90, 90: 34.90, 120: 39.90, 150: 44.90}
     env_key = f"PRECO_{num_exercicios}"
@@ -109,6 +113,12 @@ class ProdutoRequest(BaseModel):
     topico_id: int
     num_exercicios: int = Field(default=60, ge=1, le=150)
     preco: Optional[float] = None
+
+
+class ProdutoLinhaRequest(BaseModel):
+    nome: str = Field(..., min_length=1, max_length=120)
+    topico_id: int
+    serie: int = Field(default=1, ge=1, le=99)
 
 
 class KitRequest(BaseModel):
@@ -176,81 +186,53 @@ async def stats(_auth=Depends(_require_auth)):
 
 @app.get("/api/produtos")
 async def listar_produtos(_auth=Depends(_require_auth)):
-    return await asyncio.to_thread(database.listar_produtos)
+    return await asyncio.to_thread(database.listar_produtos_com_apostilas)
 
 
 @app.post("/api/produto")
-async def criar_produto(body: ProdutoRequest, _auth=Depends(_require_auth)):
+async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_auth)):
     from generator import content, images, pdf
 
-    # 1. Validate topico
     topico = await asyncio.to_thread(database.buscar_topico_por_id, body.topico_id)
     if topico is None:
         raise HTTPException(status_code=404, detail=f"Tópico {body.topico_id} não encontrado")
 
-    num = body.num_exercicios
-    preco = body.preco if body.preco is not None else _get_preco(num)
-
-    generated_files: list[str] = []
+    generated_files = []
     try:
-        # 2. Generate content
-        conteudo_json = await asyncio.to_thread(
-            content.gerar_conteudo, topico, num
-        )
+        produto_id = await asyncio.to_thread(database.criar_produto, body.nome, body.topico_id, body.serie)
+        conteudo_200_json = await asyncio.to_thread(content.gerar_conteudo, topico, 200)
+        descricao = await asyncio.to_thread(content.gerar_descricao_ml, topico, 200)
 
-        # 3. Save apostila
-        apostila_id = await asyncio.to_thread(
-            database.salvar_apostila, body.topico_id, num, conteudo_json
-        )
-
-        # 4. Generate PDF
-        pdf_path = await asyncio.to_thread(
-            pdf.gerar_pdf, apostila_id, topico, conteudo_json
-        )
-        generated_files.append(pdf_path)
-
-        # 5. Update PDF path
-        await asyncio.to_thread(database.atualizar_pdf_apostila, apostila_id, pdf_path)
-
-        # 6. Generate 6 ML titles + description
-        titulos = await asyncio.to_thread(content.gerar_titulos_ml, topico, num)
-        descricao = await asyncio.to_thread(content.gerar_descricao_ml, topico, num)
-
-        anuncios_result = []
-
-        # 7. For each of 6 title variants
-        for i, title in enumerate(titulos):
-            variacao = i + 1  # paletas vão de 1 a 6
-            # a. Generate cover image
-            image_paths = await asyncio.to_thread(
-                images.gerar_capas, apostila_id, topico, num, variacao
+        apostilas_result = []
+        for posicao, num_ex in enumerate(_FATIAS, start=1):
+            conteudo_fatia = await asyncio.to_thread(content.fatiar_conteudo, conteudo_200_json, num_ex)
+            apostila_id = await asyncio.to_thread(
+                database.salvar_apostila, body.topico_id, num_ex, conteudo_fatia, produto_id
             )
-            generated_files.extend(image_paths)
-            image_path = image_paths[0] if image_paths else None
+            pdf_path = await asyncio.to_thread(pdf.gerar_pdf, apostila_id, topico, conteudo_fatia)
+            generated_files.append(pdf_path)
+            await asyncio.to_thread(database.atualizar_pdf_apostila, apostila_id, pdf_path)
 
-            # b. Create anuncio record
+            image_path = await asyncio.to_thread(
+                images.gerar_capa_produto, apostila_id, body.nome, topico, num_ex, posicao
+            )
+            generated_files.append(image_path)
+
+            titulo = await asyncio.to_thread(content.gerar_titulo_apostila_produto, body.nome, num_ex)
+            preco = _PRECOS_PRODUTO.get(num_ex, 29.90)
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,
-                apostila_id, "fisico", variacao, title["titulo"], preco, variacao, title.get("angulo", ""),
-                None, descricao,
+                apostila_id, "fisico", posicao, titulo, preco, posicao, "produto", None, descricao,
             )
-
-            # c. Update image path
             if image_path:
-                await asyncio.to_thread(
-                    database.atualizar_anuncio, anuncio_id, imagem_path=image_path
-                )
+                await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, imagem_path=image_path)
 
-            anuncios_result.append({
-                "anuncio_id": anuncio_id,
-                "titulo": title["titulo"],
-                "angulo": title.get("angulo", ""),
-                "variacao": variacao,
-                "imagem_path": image_path,
-                "preco": preco,
+            apostilas_result.append({
+                "apostila_id": apostila_id, "num_exercicios": num_ex, "posicao": posicao,
+                "preco": preco, "titulo": titulo, "anuncio_id": anuncio_id, "imagem_path": image_path,
             })
 
-        return {"apostila_id": apostila_id, "anuncios": anuncios_result}
+        return {"produto_id": produto_id, "nome": body.nome, "serie": body.serie, "apostilas": apostilas_result}
 
     except Exception as exc:
         for fpath in generated_files:
@@ -412,16 +394,20 @@ async def deletar_anuncio(anuncio_id: int, _auth=Depends(_require_auth)):
     return {"deleted": anuncio_id}
 
 
-@app.delete("/api/produto/{apostila_id}")
-async def deletar_produto(apostila_id: int, _auth=Depends(_require_auth)):
-    ml_ids = await asyncio.to_thread(database.deletar_anuncios_por_apostila, apostila_id)
+@app.delete("/api/produto/{produto_id}")
+async def deletar_produto(produto_id: int, _auth=Depends(_require_auth)):
+    apostilas = await asyncio.to_thread(database.listar_apostilas_por_produto, produto_id)
     ml_fechados = 0
-    for ml_id in ml_ids:
-        ok = await asyncio.to_thread(ml_client.fechar_anuncio_ml, ml_id)
-        if ok:
-            ml_fechados += 1
-    await asyncio.to_thread(database.deletar_apostila, apostila_id)
-    return {"deleted": apostila_id, "ml_fechados": ml_fechados}
+    for ap in apostilas:
+        anuncios = await asyncio.to_thread(database.listar_anuncios, None, None, None, None, ap["id"])
+        for an in anuncios:
+            if an.get("ml_id"):
+                ok = await asyncio.to_thread(ml_client.fechar_anuncio_ml, an["ml_id"])
+                if ok:
+                    ml_fechados += 1
+            await asyncio.to_thread(database.atualizar_anuncio, an["id"], status="deletado")
+    await asyncio.to_thread(database.deletar_produto, produto_id)
+    return {"deleted": produto_id, "ml_fechados": ml_fechados}
 
 
 @app.delete("/api/kit/{kit_id}")
