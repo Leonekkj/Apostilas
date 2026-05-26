@@ -517,6 +517,21 @@
       padding: 2px 7px;
     }
 
+    .apostila-select {
+      font-size: 11.5px;
+      padding: 3px 6px;
+      border: 1px solid var(--card-border);
+      border-radius: 4px;
+      background: var(--card-bg);
+      color: var(--text);
+      cursor: pointer;
+      max-width: 160px;
+    }
+    .apostila-select.unlinked {
+      border-color: var(--error);
+      color: var(--error);
+    }
+
     /* ─────────────────────────────────────────────
        Filters bar (Anúncios)
     ───────────────────────────────────────────── */
@@ -1018,11 +1033,12 @@
                 <th>Var.</th>
                 <th>Preço</th>
                 <th>Status</th>
+                <th>Apostila</th>
                 <th>Ações</th>
               </tr>
             </thead>
             <tbody id="anuncios-tbody">
-              <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted)"><div class="spinner-page"></div></td></tr>
+              <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--muted)"><div class="spinner-page"></div></td></tr>
             </tbody>
           </table>
         </div>
@@ -1182,6 +1198,7 @@
 const API_BASE = window.location.origin;
 let TOKEN = localStorage.getItem('admin_token') || '';
 let _allAnuncios = [];
+let _todasApostilas = [];
 let _activeStatusFilter = '';
 let _produtos = [];
 let _kits = [];
@@ -1525,9 +1542,17 @@ async function criarKit() {
 // ─────────────────────────────────────────────
 // Anúncios
 // ─────────────────────────────────────────────
+async function loadApostilas() {
+  try {
+    const res = await apiFetch('/api/admin/apostilas');
+    if (!res.ok) return;
+    _todasApostilas = await res.json();
+  } catch (_) {}
+}
+
 async function loadAnuncios() {
   const tbody = document.getElementById('anuncios-tbody');
-  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;"><div class="spinner-page"></div></td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;"><div class="spinner-page"></div></td></tr>';
   try {
     const url = _activeStatusFilter ? `/api/anuncios?status=${_activeStatusFilter}` : '/api/anuncios';
     const res = await apiFetch(url);
@@ -1536,9 +1561,10 @@ async function loadAnuncios() {
       throw new Error(`HTTP ${res.status}`);
     }
     _allAnuncios = await res.json();
+    await loadApostilas();
     filterAnuncios();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--error);">Erro ao carregar anúncios: ${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--error);">Erro ao carregar anúncios: ${e.message}</td></tr>`;
   }
 }
 
@@ -1560,7 +1586,7 @@ function filterAnuncios() {
 function renderAnuncios(list) {
   const tbody = document.getElementById('anuncios-tbody');
   if (!list.length) {
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><p>Nenhum anúncio encontrado.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><p>Nenhum anúncio encontrado.</p></div></td></tr>`;
     return;
   }
   tbody.innerHTML = list.map(a => {
@@ -1569,6 +1595,20 @@ function renderAnuncios(list) {
       ? `<div class="td-thumb"><img src="${imgSrc}" alt="" onerror="this.parentElement.innerHTML='📋'"></div>`
       : `<div class="td-thumb">📋</div>`;
     const nomeProduto = a.topico_nome || a.kit_nome || `#${a.apostila_id || a.kit_id || '—'}`;
+    const apostilaOptions = [
+      `<option value="">— Não linkado —</option>`,
+      ..._todasApostilas.map(ap =>
+        `<option value="${ap.id}" ${ap.id === a.apostila_id ? 'selected' : ''}>
+          ${esc(ap.topico_nome)} ${ap.num_exercicios}ex
+        </option>`
+      )
+    ].join('');
+    const isUnlinked = !a.apostila_id;
+    const apostilaCell = `
+      <select class="apostila-select ${isUnlinked ? 'unlinked' : ''}"
+              onchange="linkApostila(${a.id}, this)">
+        ${apostilaOptions}
+      </select>`;
     const precoVal = a.preco != null ? parseFloat(a.preco).toFixed(2) : null;
     const preco = precoVal != null
       ? `<span style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;" title="Clique para editar" onclick="editarPreco(${a.id}, this, ${precoVal})">R$ ${precoVal.replace('.', ',')}</span>`
@@ -1598,6 +1638,7 @@ function renderAnuncios(list) {
         <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px;">${a.variacao ?? '—'}</td>
         <td class="price-mono">${preco}</td>
         <td><span class="badge ${badgeClass}">${a.status || 'rascunho'}</span></td>
+        <td>${apostilaCell}</td>
         <td style="white-space:nowrap;display:flex;gap:4px;align-items:center;">${publishBtn}${mlLink}${deleteBtn}</td>
       </tr>`;
   }).join('');
@@ -1891,6 +1932,25 @@ async function openPedidosDrawer(apostilaId, titulo) {
 function closePedidosDrawer(e) {
   if (e && e.target !== document.getElementById('pedidos-drawer')) return;
   document.getElementById('pedidos-drawer').classList.remove('open');
+}
+
+async function linkApostila(anuncioId, selectEl) {
+  const apostilaId = selectEl.value ? parseInt(selectEl.value) : null;
+  selectEl.disabled = true;
+  try {
+    const res = await apiFetch(`/api/admin/anuncios/${anuncioId}/apostila`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apostila_id: apostilaId }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    selectEl.classList.toggle('unlinked', !apostilaId);
+    showToast('Apostila linkada com sucesso', 'success');
+  } catch (e) {
+    showToast(`Erro ao linkar: ${e.message}`, 'error');
+  } finally {
+    selectEl.disabled = false;
+  }
 }
 </script>
 </body>
