@@ -122,7 +122,7 @@ Gere todos os {num_exercicios} exercícios no array "exercicios".\
     client = _client()
     response = client.chat.completions.create(
         model=_MODEL,
-        max_tokens=min(int(num_exercicios * 150) + 1000, 8000),
+        max_tokens=min(int(num_exercicios * 150) + 1000, 8000),  # Groq max ~8192
         messages=[
             {"role": "system", "content": _SYSTEM_CONTEUDO},
             {"role": "user", "content": prompt},
@@ -452,10 +452,15 @@ Complemento deve mencionar idosos. Varie: Apostila Física, Estimulação Cognit
 Retorne SOMENTE o título, sem aspas, sem explicação."""
     client = _client()
     response = client.chat.completions.create(
-        model=_MODEL, max_tokens=80,
-        messages=[{"role": "system", "content": _SYSTEM_TITULOS}, {"role": "user", "content": prompt}],
+        model=_MODEL,
+        max_tokens=80,
+        messages=[
+            {"role": "system", "content": _SYSTEM_TITULOS},
+            {"role": "user", "content": prompt},
+        ],
     )
-    return response.choices[0].message.content.strip().strip('"').rstrip(".")
+    titulo = response.choices[0].message.content.strip().strip('"').rstrip(".")
+    return titulo[:60] if len(titulo) > 60 else titulo
 
 
 # ---------------------------------------------------------------------------
