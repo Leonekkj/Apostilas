@@ -94,7 +94,7 @@ _PRECOS_PRODUTO = {30: 14.90, 60: 19.90, 90: 24.90, 120: 29.90, 150: 34.90, 200:
 
 
 def _get_preco(num_exercicios: int) -> float:
-    defaults = {60: 29.90, 90: 34.90, 120: 39.90, 150: 44.90}
+    defaults = {30: 14.90, 60: 29.90, 90: 34.90, 120: 39.90, 150: 44.90, 200: 44.90}
     env_key = f"PRECO_{num_exercicios}"
     raw = os.getenv(env_key)
     if raw:
@@ -198,6 +198,9 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
         raise HTTPException(status_code=404, detail=f"Tópico {body.topico_id} não encontrado")
 
     generated_files = []
+    created_apostila_ids = []
+    created_anuncio_ids = []
+    produto_id = None
     try:
         produto_id = await asyncio.to_thread(database.criar_produto, body.nome, body.topico_id, body.serie)
         conteudo_200_json = await asyncio.to_thread(content.gerar_conteudo, topico, 200)
@@ -209,6 +212,7 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             apostila_id = await asyncio.to_thread(
                 database.salvar_apostila, body.topico_id, num_ex, conteudo_fatia, produto_id
             )
+            created_apostila_ids.append(apostila_id)
             pdf_path = await asyncio.to_thread(pdf.gerar_pdf, apostila_id, topico, conteudo_fatia)
             generated_files.append(pdf_path)
             await asyncio.to_thread(database.atualizar_pdf_apostila, apostila_id, pdf_path)
@@ -222,8 +226,9 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             preco = _PRECOS_PRODUTO.get(num_ex, 29.90)
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,
-                apostila_id, "fisico", posicao, titulo, preco, posicao, "produto", None, descricao,
+                apostila_id, "fisico", posicao, titulo, preco, posicao, "", None, descricao,
             )
+            created_anuncio_ids.append(anuncio_id)
             if image_path:
                 await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, imagem_path=image_path)
 
@@ -239,6 +244,16 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             try:
                 os.remove(fpath)
             except OSError:
+                pass
+        for apid in created_apostila_ids:
+            try:
+                await asyncio.to_thread(database.deletar_apostila, apid)
+            except Exception:
+                pass
+        if produto_id:
+            try:
+                await asyncio.to_thread(database.deletar_produto, produto_id)
+            except Exception:
                 pass
         raise HTTPException(status_code=500, detail=f"Erro ao gerar produto: {exc}") from exc
 
