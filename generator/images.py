@@ -17,33 +17,51 @@ from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
-# Prompts por variação (v1-v3 tentam AI; v4-v6 sempre usam Pillow)
-_AI_PROMPTS = {
-    1: (
-        "professional product photo of a closed white spiral bound workbook on a light wooden desk, "
-        "front cover facing directly toward camera, clean flat white cover with no markings, "
-        "silver coil binding on the left edge, one green pen beside it, soft natural studio light, "
-        "blurred background, clean minimalist composition, photorealistic, no text on cover"
-    ),
-    2: (
-        "elderly woman with short grey hair smiling and writing in a spiral notebook, "
-        "sitting at a wooden desk near a window, warm natural daylight, cozy home, "
-        "simple background, photorealistic, no objects on table except notebook and pen"
-    ),
-    3: (
-        "top down flat lay photo of a closed white spiral notebook centered in frame, "
-        "clean flat white front cover facing up with no markings, notebook fills most of the image, "
-        "one green pen placed diagonally beside it, warm wood table visible at edges, "
-        "soft shadows, professional product photography, no text on cover"
-    ),
-}
+def _build_ai_prompts(titulo: str, num_exercicios: int = 60) -> dict:
+    """Gera prompts dinâmicos para o Leonardo AI baseados no título do produto."""
+    import unicodedata
+    def _ascii(s):
+        return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+
+    t = _ascii(titulo)
+    t_up = t.upper()
+
+    return {
+        # v1 — composite: idosa + livro em destaque (sem texto específico para evitar erros de tipografia)
+        1: (
+            f"Brazilian e-commerce product listing photo, professional marketing advertisement, "
+            f"photorealistic 4k. Composition: right side shows elderly Brazilian woman 70s with short white hair, "
+            f"smiling warmly, sitting at a bright wooden desk, writing in an open spiral workbook. "
+            f"Left foreground: closed white spiral-bound workbook standing upright, "
+            f"dark green header bar at top with brand logo area, white body, silver spiral binding on left side. "
+            f"Soft studio lighting, clean white background, professional product photography style"
+        ),
+        # v2 — lifestyle: idosa escrevendo, foto quente e autêntica (sem texto)
+        2: (
+            f"warm professional lifestyle photo for Brazilian e-commerce, photorealistic, 4k. "
+            f"Elderly Brazilian woman 70s with short white hair and reading glasses, "
+            f"wearing a comfortable light cardigan, sitting at a wooden desk near a window, "
+            f"smiling gently and focused, writing with a pen in a large open spiral-bound workbook "
+            f"showing exercise pages with word searches and number grids. "
+            f"A ceramic mug of tea beside her, green plants in soft-focus background, "
+            f"warm golden natural light from the window, authentic heartwarming expression"
+        ),
+        # v3 — product mockup: livro em pé, sem texto específico para evitar erros de tipografia
+        3: (
+            f"professional product photography for e-commerce, photorealistic ultra 4k product shot. "
+            f"A closed thick spiral-bound workbook standing upright on a clean light wooden surface, "
+            f"front cover: white background, dark green top bar, many pages visible on right showing book thickness, "
+            f"dark spiral binding on left. Bright airy background with soft window light and bokeh, "
+            f"small succulent plant beside book, dramatic soft studio lighting, shallow depth of field"
+        ),
+    }
 
 # Estimated book cover rect (x0, y0, x1, y1) within the 1200x1200 composited image.
 # Region sits between the header (ends y=106) and bottom panel (starts y=870).
 # v2 (lifestyle) is None — book too small/angled to reliably composite.
 _COVER_LABEL_COORDS = {
-    1: (300, 120, 700, 840),  # product shot: book centered, portrait orientation
-    3: (230, 110, 770, 840),  # flat lay: book fills center of image
+    1: (380, 130, 760, 820),  # product shot: recuado da espiral, cobre a capa branca
+    3: (260, 115, 740, 820),  # flat lay: book fills center of image
 }
 
 # ---------------------------------------------------------------------------
@@ -178,9 +196,15 @@ def _render_cover_label(titulo: str, cor_escura: tuple, cor_acento: tuple,
         ty += lh + 4
 
     ld.rectangle([(0, mid_y1), (width, height)], fill=(*cor_escura, 195))
-    font_bot = _font_regular(max(12, bot_h - 10))
     bot_text = "APOSTILA FÍSICA"
+    # Start at bot_h-10 and shrink until text fits
+    sz = max(12, bot_h - 10)
+    font_bot = _font_regular(sz)
     bw2, bh2 = _text_size(ld, bot_text, font_bot)
+    while bw2 > width - 12 and sz > 12:
+        sz -= 2
+        font_bot = _font_regular(sz)
+        bw2, bh2 = _text_size(ld, bot_text, font_bot)
     ld.text(((width - bw2) // 2, mid_y1 + (bot_h - bh2) // 2),
             bot_text, font=font_bot, fill=(255, 255, 255, 210))
 
@@ -410,6 +434,54 @@ def _draw_benefit_chips(draw: ImageDraw.ImageDraw, beneficios: list[str],
 # Geração de imagem via HF FLUX.1-schnell
 # ---------------------------------------------------------------------------
 
+def _fetch_leonardo_image(prompt: str) -> "Image.Image | None":
+    import io, time, requests as _req
+    token = os.environ.get("LEONARDO_API_KEY", "")
+    if not token:
+        return None
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    try:
+        resp = _req.post(
+            "https://cloud.leonardo.ai/api/rest/v1/generations",
+            headers=headers,
+            json={
+                "modelId": "de7d3faf-762f-48e0-b3b7-9d0ac3a3fcf3",  # Leonardo Phoenix 1.0
+                "prompt": prompt,
+                "negative_prompt": (
+                    "blurry text, illegible text, misspelled words, garbled letters, "
+                    "distorted typography, wrong spelling, jumbled characters, bad fonts"
+                ),
+                "width": 1024,
+                "height": 1024,
+                "num_images": 1,
+                "guidance_scale": 7,
+                "alchemy": True,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        generation_id = resp.json()["sdGenerationJob"]["generationId"]
+
+        for _ in range(30):
+            time.sleep(3)
+            r = _req.get(
+                f"https://cloud.leonardo.ai/api/rest/v1/generations/{generation_id}",
+                headers=headers,
+                timeout=15,
+            )
+            r.raise_for_status()
+            data = r.json().get("generations_by_pk", {})
+            if data.get("status") == "COMPLETE":
+                url = data["generated_images"][0]["url"]
+                img_data = _req.get(url, timeout=30).content
+                return Image.open(io.BytesIO(img_data)).convert("RGB")
+
+        logger.warning("Leonardo AI: timeout aguardando geração")
+    except Exception as e:
+        logger.warning("Falha ao buscar imagem Leonardo AI: %s", e)
+    return None
+
+
 def _fetch_hf_image(prompt: str) -> "Image.Image | None":
     token = os.environ.get("HF_TOKEN", "")
     if not token:
@@ -429,9 +501,21 @@ def _fetch_hf_image(prompt: str) -> "Image.Image | None":
     return None
 
 
-def _sombra(draw, x, y, text, font, fill, offset=2):
+def _fetch_ai_image(prompt: str) -> "tuple[Image.Image | None, str | None]":
+    """Retorna (imagem, fonte) — fonte é 'leonardo', 'hf', ou None."""
+    img = _fetch_leonardo_image(prompt)
+    if img is not None:
+        return img, "leonardo"
+    img = _fetch_hf_image(prompt)
+    if img is not None:
+        return img, "hf"
+    return None, None
+
+
+def _sombra(draw, x, y, text, font, fill, offset=3):
     """Texto com sombra para legibilidade sobre fundos variados."""
-    draw.text((x + offset, y + offset), text, font=font, fill=(0, 0, 0, 160))
+    draw.text((x + offset, y + offset), text, font=font, fill=(0, 0, 0, 200))
+    draw.text((x + offset + 1, y + offset + 1), text, font=font, fill=(0, 0, 0, 120))
     draw.text((x, y), text, font=font, fill=fill)
 
 
@@ -477,7 +561,7 @@ def _overlay_branding(img: Image.Image,
     sub = "ESTIMULAÇÃO COGNITIVA TERAPÊUTICA"
     sw, _ = _text_size(draw, sub, font_sub_logo)
     draw.text(((1200 - sw) // 2, 68), sub, font=font_sub_logo,
-              fill=_blend(cor_escura, (255, 255, 255), 0.55))
+              fill=(210, 210, 210))
 
     # Título no painel inferior
     branco = (255, 255, 255)
@@ -504,7 +588,7 @@ def _overlay_branding(img: Image.Image,
     by1 = by0 + bh + pad_y * 2
     draw.rounded_rectangle([(bx0, by0), (bx1, by1)], radius=26,
                             fill=_blend(cor_escura, (255, 255, 255), 0.15))
-    draw.rounded_rectangle([(bx0, by0), (bx1, by1)], radius=26, outline=cor_acento, width=2)
+    draw.rounded_rectangle([(bx0, by0), (bx1, by1)], radius=26, outline=cor_acento, width=3)
     draw.text((bx0 + pad_x, by0 + pad_y), badge_texto, font=font_b, fill=cor_acento)
 
     # Rodapé
@@ -515,7 +599,7 @@ def _overlay_branding(img: Image.Image,
     draw.text(((1200 - fw) // 2, ry), linha1, font=font_f1, fill=cor_acento)
     fw2, _ = _text_size(draw, linha2, font_f2)
     draw.text(((1200 - fw2) // 2, ry + 38), linha2, font=font_f2,
-              fill=_blend(cor_escura, (255, 255, 255), 0.6))
+              fill=(200, 200, 200))
 
     return composited.convert("RGB")
 
@@ -724,6 +808,148 @@ _LAYOUT_MAP = {
 }
 
 
+def _overlay_typography(
+    img: Image.Image,
+    cor_escura: tuple, cor_acento: tuple,
+    titulo: str, badge_texto: str, linha2: str,
+    beneficios: list[str],
+    variacao: int,
+) -> Image.Image:
+    """Overlay cirúrgico de tipografia sobre foto Leonardo. Só adiciona texto, não cobre a foto."""
+    base = img.resize(SIZE, Image.LANCZOS).convert("RGBA")
+    canvas = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    verde = cor_escura
+    branco = (255, 255, 255)
+    sombra = (0, 0, 0, 160)
+
+    if variacao == 1:
+        # --- Capa do livro (esquerda, coords estimadas para prompt v1) ---
+        cx0, cy0, cx1, cy1 = 60, 160, 440, 960
+        cw, ch = cx1 - cx0, cy1 - cy0
+
+        # Fundo branco da capa
+        canvas.paste(Image.new("RGBA", (cw, ch), (255, 255, 255, 245)), (cx0, cy0))
+        cdraw = ImageDraw.Draw(canvas)
+
+        # Barra verde topo
+        bar_h = int(ch * 0.13)
+        cdraw.rectangle([(cx0, cy0), (cx1, cy0 + bar_h)], fill=(*verde, 255))
+        font_brand = _font(int(bar_h * 0.52))
+        bw, _ = _text_size(cdraw, "CogniVita", font_brand)
+        cdraw.text((cx0 + (cw - bw) // 2, cy0 + bar_h // 2 - int(bar_h * 0.26)),
+                   "CogniVita", font=font_brand, fill=branco)
+
+        # Título centralizado na capa
+        font_title = _font(int(cw * 0.13))
+        lines = _wrap(titulo.upper(), font_title, cw - 24, cdraw)
+        if len(lines) > 3:
+            font_title = _font(int(cw * 0.10))
+            lines = _wrap(titulo.upper(), font_title, cw - 24, cdraw)
+        total_h = sum(_text_size(cdraw, l, font_title)[1] + 8 for l in lines)
+        ty = cy0 + bar_h + (ch - bar_h - total_h) // 2 - 20
+        for line in lines:
+            lw, lh = _text_size(cdraw, line, font_title)
+            cdraw.text((cx0 + (cw - lw) // 2, ty), line, font=font_title, fill=verde)
+            ty += lh + 8
+
+        # "Para Idosos 60+" abaixo do título
+        font_sub = _font_regular(int(cw * 0.09))
+        sub = "Para Idosos 60+"
+        sw, _ = _text_size(cdraw, sub, font_sub)
+        cdraw.text((cx0 + (cw - sw) // 2, ty + 12), sub, font=font_sub,
+                   fill=(*verde, 180))
+
+        # --- Headline no topo (com sombra para legibilidade) ---
+        font_h = _font(68)
+        headline = titulo.upper()
+        hlines = _wrap(headline, font_h, 720, draw)
+        hy = 28
+        for hl in hlines[:2]:
+            draw.text((470 + 3, hy + 3), hl, font=font_h, fill=(0, 0, 0, 140))
+            draw.text((470, hy), hl, font=font_h, fill=(*verde, 255))
+            hy += _text_size(draw, hl, font_h)[1] + 6
+
+        # --- Painel de benefícios (canto inferior direito) ---
+        bx0, by0 = 460, 730
+        bp_w, bp_h = 720, 440
+        panel = Image.new("RGBA", (bp_w, bp_h), (255, 255, 255, 230))
+        pr = ImageDraw.Draw(panel)
+        font_b = _font_regular(36)
+        checkmark = "✓"
+        font_ck = _font(38)
+        py = 24
+        for ben in beneficios[:5]:
+            pr.text((16, py), checkmark, font=font_ck, fill=(*verde, 255))
+            pr.text((68, py + 2), ben, font=font_b, fill=(*verde, 255))
+            py += 72
+        canvas.paste(panel, (bx0, by0), panel)
+
+    elif variacao == 2:
+        # --- Barra de marca no topo (fina, elegante) ---
+        bar_h = 72
+        bar = Image.new("RGBA", (1200, bar_h), (*verde, 220))
+        bdraw = ImageDraw.Draw(bar)
+        font_brand = _font(40)
+        bw, bh = _text_size(bdraw, "CogniVita", font_brand)
+        bdraw.text(((1200 - bw) // 2, (bar_h - bh) // 2), "CogniVita",
+                   font=font_brand, fill=branco)
+        canvas.paste(bar, (0, 0), bar)
+
+        # --- Faixa inferior com título ---
+        bot_h = 130
+        bot = Image.new("RGBA", (1200, bot_h), (*verde, 215))
+        bdraw2 = ImageDraw.Draw(bot)
+        font_t = _font(48)
+        lines = _wrap(titulo.upper(), font_t, 1100, bdraw2)
+        ty = (bot_h - len(lines) * 58) // 2
+        for line in lines[:2]:
+            lw, _ = _text_size(bdraw2, line, font_t)
+            bdraw2.text(((1200 - lw) // 2, ty), line, font=font_t, fill=branco)
+            ty += 58
+        canvas.paste(bot, (0, 1200 - bot_h), bot)
+
+    elif variacao == 3:
+        # --- Capa do livro (centro, coords estimadas para prompt v3) ---
+        cx0, cy0, cx1, cy1 = 195, 55, 755, 1060
+        cw, ch = cx1 - cx0, cy1 - cy0
+
+        canvas.paste(Image.new("RGBA", (cw, ch), (255, 255, 255, 230)), (cx0, cy0))
+        cdraw = ImageDraw.Draw(canvas)
+
+        # Barra verde topo
+        bar_h = int(ch * 0.12)
+        cdraw.rectangle([(cx0, cy0), (cx1, cy0 + bar_h)], fill=(*verde, 255))
+        font_brand = _font(int(bar_h * 0.52))
+        bw, _ = _text_size(cdraw, "CogniVita", font_brand)
+        cdraw.text((cx0 + (cw - bw) // 2, cy0 + bar_h // 2 - int(bar_h * 0.26)),
+                   "CogniVita", font=font_brand, fill=branco)
+
+        # Título
+        font_title = _font(int(cw * 0.13))
+        lines = _wrap(titulo.upper(), font_title, cw - 32, cdraw)
+        if len(lines) > 3:
+            font_title = _font(int(cw * 0.10))
+            lines = _wrap(titulo.upper(), font_title, cw - 32, cdraw)
+        total_h = sum(_text_size(cdraw, l, font_title)[1] + 10 for l in lines)
+        ty = cy0 + bar_h + (ch - bar_h - total_h) // 2 - 30
+        for line in lines:
+            lw, lh = _text_size(cdraw, line, font_title)
+            cdraw.text((cx0 + (cw - lw) // 2, ty), line, font=font_title, fill=verde)
+            ty += lh + 10
+
+        # Subtítulo
+        font_sub = _font_regular(int(cw * 0.08))
+        sub = "Estimulação Cognitiva"
+        sw, _ = _text_size(cdraw, sub, font_sub)
+        cdraw.text((cx0 + (cw - sw) // 2, ty + 16), sub, font=font_sub,
+                   fill=(*verde, 180))
+
+    result = Image.alpha_composite(base, canvas)
+    return result.convert("RGB")
+
+
 def _gerar_capa(
     path: Path,
     variacao: int,
@@ -733,6 +959,7 @@ def _gerar_capa(
     rodape_linha2: str,
     beneficios: list[str] = None,
     ai_image: "Image.Image | None" = None,
+    ai_source: "str | None" = None,
 ):
     cor_escura_hex, cor_clara_hex, cor_acento_hex = PALETAS[variacao]
     cor_escura = _hex(cor_escura_hex)
@@ -742,17 +969,27 @@ def _gerar_capa(
     if beneficios is None:
         beneficios = _BENEFICIOS_PADRAO
 
-    # Variações 1-3: tenta layout híbrido (AI photo + branding Pillow)
-    if variacao in (1, 2, 3) and ai_image is not None:
-        result = _overlay_branding(
-            ai_image, cor_escura, cor_acento,
-            titulo, badge_texto, rodape_linha1, rodape_linha2,
-            variacao=variacao
-        )
-        result.save(str(path), "PNG")
-        return
+    if variacao in (1, 2, 3):
+        if ai_image is not None:
+            if ai_source == "leonardo":
+                # Leonardo: salva a foto diretamente, sem overlay Pillow
+                ai_image.resize(SIZE, Image.LANCZOS).convert("RGB").save(str(path), "PNG")
+                return
+            # HuggingFace: mantém overlay híbrido original
+            result = _overlay_branding(
+                ai_image, cor_escura, cor_acento,
+                titulo, badge_texto, rodape_linha1, rodape_linha2,
+                variacao=variacao
+            )
+            result.save(str(path), "PNG")
+            return
+        else:
+            # Leonardo falhou: fundo verde sólido simples, sem overlay pesado com texto
+            img = Image.new("RGB", SIZE, color=(20, 70, 45))
+            img.save(str(path), "PNG")
+            return
 
-    # Fallback: layout Pillow puro
+    # Fallback: layout Pillow puro (v4-v6)
     img = Image.new("RGB", SIZE, color=cor_clara)
     draw = ImageDraw.Draw(img)
     layout_fn = _LAYOUT_MAP.get(variacao, _layout_centrado)
@@ -765,14 +1002,14 @@ def _gerar_capa(
 # API pública
 # ---------------------------------------------------------------------------
 
-def _fetch_ai_images_for_variacoes(variacoes: list[int]) -> dict:
-    """Busca imagens AI para as variações 1-3, uma chamada por variação necessária."""
-    ai_needed = [v for v in variacoes if v in _AI_PROMPTS]
+def _fetch_ai_images_for_variacoes(variacoes: list[int], prompts: dict) -> dict:
+    """Busca imagens AI para as variações 1-3. Retorna dict v -> (imagem, fonte)."""
+    ai_needed = [v for v in variacoes if v in prompts]
     ai_images = {}
     for v in ai_needed:
-        img = _fetch_hf_image(_AI_PROMPTS[v])
-        if img:
-            ai_images[v] = img
+        img, source = _fetch_ai_image(prompts[v])
+        if img is not None:
+            ai_images[v] = (img, source)
         else:
             logger.info("AI indisponível para variação %s, usando Pillow puro", v)
     return ai_images
@@ -793,13 +1030,16 @@ def gerar_capas(
     rodape2 = "Impressa e Encadernada · Para Idosos 60+"
 
     variacoes = [variacao] if variacao is not None else list(range(1, 7))
-    ai_images = _fetch_ai_images_for_variacoes(variacoes)
+    prompts = _build_ai_prompts(titulo, num_exercicios)
+    ai_images = _fetch_ai_images_for_variacoes(variacoes, prompts)
     paths = []
 
     for v in variacoes:
         fname = OUTPUT_DIR / f"apostila_{apostila_id}_v{v}.png"
+        ai_entry = ai_images.get(v)
+        ai_img, ai_src = ai_entry if ai_entry else (None, None)
         _gerar_capa(fname, v, titulo, badge, rodape1, rodape2,
-                    ai_image=ai_images.get(v))
+                    ai_image=ai_img, ai_source=ai_src)
         paths.append(str(fname))
 
     return paths
@@ -820,13 +1060,38 @@ def gerar_capas_kit(
     rodape2 = "Apostilas Físicas · Para Idosos 60+"
 
     variacoes = [variacao] if variacao is not None else list(range(1, 7))
-    ai_images = _fetch_ai_images_for_variacoes(variacoes)
+    prompts = _build_ai_prompts(kit_nome, total_exercicios)
+    ai_images = _fetch_ai_images_for_variacoes(variacoes, prompts)
     paths = []
 
     for v in variacoes:
         fname = OUTPUT_DIR / f"kit_{kit_id}_v{v}.png"
+        ai_entry = ai_images.get(v)
+        ai_img, ai_src = ai_entry if ai_entry else (None, None)
         _gerar_capa(fname, v, kit_nome, badge, rodape1, rodape2,
-                    ai_image=ai_images.get(v))
+                    ai_image=ai_img, ai_source=ai_src)
         paths.append(str(fname))
 
     return paths
+
+
+def gerar_capa_produto(
+    apostila_id: int,
+    nome_produto: str,
+    topico: dict,
+    num_exercicios: int,
+    posicao: int,    # 1-6, determines palette and layout
+) -> str:
+    """Gera 1 capa para uma apostila de linha de produto. Retorna path do PNG."""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    badge   = f"✦ {num_exercicios} EXERCÍCIOS ✦"
+    rodape1 = nome_produto.upper()
+    rodape2 = f"{num_exercicios} Exercícios · Apostila Física · Para Idosos 60+"
+    prompts = _build_ai_prompts(nome_produto, num_exercicios)
+    ai_images = _fetch_ai_images_for_variacoes([posicao], prompts)
+    fname = OUTPUT_DIR / f"apostila_{apostila_id}_v{posicao}.png"
+    ai_entry = ai_images.get(posicao)
+    ai_img, ai_src = ai_entry if ai_entry else (None, None)
+    _gerar_capa(fname, posicao, nome_produto, badge, rodape1, rodape2,
+                ai_image=ai_img, ai_source=ai_src)
+    return str(fname)
