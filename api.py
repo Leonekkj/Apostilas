@@ -399,7 +399,7 @@ async def deletar_produto(produto_id: int, _auth=Depends(_require_auth)):
     apostilas = await asyncio.to_thread(database.listar_apostilas_por_produto, produto_id)
     ml_fechados = 0
     for ap in apostilas:
-        anuncios = await asyncio.to_thread(database.listar_anuncios, None, None, None, None, ap["id"])
+        anuncios = await asyncio.to_thread(database.listar_anuncios, apostila_id=ap["id"])
         for an in anuncios:
             if an.get("ml_id"):
                 ok = await asyncio.to_thread(ml_client.fechar_anuncio_ml, an["ml_id"])
