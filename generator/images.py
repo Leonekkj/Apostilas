@@ -1078,11 +1078,11 @@ def gerar_capas_kit(
 def gerar_capa_produto(
     apostila_id: int,
     nome_produto: str,
-    topico: dict,
+    topico: dict,          # reserved for future prompt context
     num_exercicios: int,
     posicao: int,    # 1-6, determines palette and layout
 ) -> str:
-    """Gera 1 capa para uma apostila de linha de produto. Retorna path do PNG."""
+    """Gera 1 capa para uma apostila de linha de produto. Retorna str (path do PNG), não lista."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     badge   = f"✦ {num_exercicios} EXERCÍCIOS ✦"
     rodape1 = nome_produto.upper()
