@@ -798,6 +798,116 @@
     ───────────────────────────────────────────── */
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
+
+    /* ── Vendas ── */
+    .vendas-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .vendas-sync-info {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .vendas-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .venda-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 20px;
+      cursor: pointer;
+      transition: box-shadow 0.15s, border-color 0.15s;
+    }
+    .venda-card:hover {
+      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+      border-color: var(--accent);
+    }
+    .venda-card-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 12px;
+      line-height: 1.3;
+    }
+    .venda-card-stats {
+      display: flex;
+      gap: 16px;
+    }
+    .venda-stat {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .venda-stat-value {
+      font-size: 22px;
+      font-weight: 500;
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .venda-stat-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    /* Drawer lateral de pedidos */
+    .drawer-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      z-index: 200;
+    }
+    .drawer-backdrop.open { display: block; }
+    .drawer {
+      position: fixed;
+      top: 0; right: 0; bottom: 0;
+      width: 480px;
+      max-width: 100vw;
+      background: var(--card-bg);
+      box-shadow: -4px 0 24px rgba(0,0,0,0.12);
+      z-index: 201;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.25s ease;
+    }
+    .drawer-backdrop.open .drawer { transform: translateX(0); }
+    .drawer-header {
+      padding: 24px 24px 16px;
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .drawer-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 20px;
+      font-weight: 600;
+    }
+    .drawer-close {
+      background: none; border: none; font-size: 20px;
+      cursor: pointer; color: var(--muted); padding: 4px 8px;
+    }
+    .drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 24px;
+    }
+    .pedidos-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .pedidos-table th {
+      text-align: left; padding: 8px 6px;
+      border-bottom: 2px solid var(--card-border);
+      color: var(--muted); font-weight: 500;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .pedidos-table td { padding: 10px 6px; border-bottom: 1px solid var(--card-border); }
   </style>
 </head>
 <body>
@@ -824,6 +934,9 @@
         </button>
         <button class="nav-item" data-tab="anuncios" onclick="switchTab('anuncios')">
           <span class="nav-icon">📋</span> Anúncios
+        </button>
+        <button class="nav-item" data-tab="vendas" onclick="switchTab('vendas')">
+          <span class="nav-icon">💰</span> Vendas
         </button>
       </nav>
 
@@ -911,6 +1024,45 @@
             <tbody id="anuncios-tbody">
               <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted)"><div class="spinner-page"></div></td></tr>
             </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── VENDAS ─────────────────────────── -->
+    <div id="tab-vendas" class="tab-panel">
+      <div class="page-header">
+        <h2 class="page-title">Vendas</h2>
+        <div class="vendas-header">
+          <button class="btn btn-primary" onclick="syncVendas(this)">↻ Sincronizar</button>
+          <span class="vendas-sync-info" id="vendas-sync-info">—</span>
+        </div>
+      </div>
+      <div class="page-content">
+        <div id="vendas-grid" class="vendas-grid">
+          <p style="color:var(--muted);font-size:13px;">Clique em "Sincronizar" para buscar as vendas do Mercado Livre.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Drawer de pedidos por apostila -->
+    <div class="drawer-backdrop" id="pedidos-drawer" onclick="closePedidosDrawer(event)">
+      <div class="drawer">
+        <div class="drawer-header">
+          <span class="drawer-title" id="drawer-apostila-titulo">Pedidos</span>
+          <button class="drawer-close" onclick="closePedidosDrawer()">✕</button>
+        </div>
+        <div class="drawer-body">
+          <table class="pedidos-table">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Comprador</th>
+                <th>Qtd</th>
+                <th>Valor</th>
+              </tr>
+            </thead>
+            <tbody id="pedidos-tbody"></tbody>
           </table>
         </div>
       </div>
@@ -1077,11 +1229,12 @@ function switchTab(name) {
 
   if (name === 'anuncios') loadAnuncios();
   if (name === 'kits') loadKits();
+  if (name === 'vendas') loadVendasResumo();
 }
 
 function initTabFromHash() {
   const hash = window.location.hash.replace('#', '');
-  if (['produtos', 'kits', 'anuncios'].includes(hash)) {
+  if (['produtos', 'kits', 'anuncios', 'vendas'].includes(hash)) {
     switchTab(hash);
   }
 }
@@ -1647,6 +1800,98 @@ async function init() {
 }
 
 init();
+
+// ─────────────────────────────────────────────
+// Vendas
+// ─────────────────────────────────────────────
+async function loadVendasResumo() {
+  const grid = document.getElementById('vendas-grid');
+  grid.innerHTML = '<div class="spinner-page"></div>';
+  try {
+    const res = await apiFetch('/api/admin/vendas/resumo');
+    if (!res.ok) { if (res.status === 401) { showTokenModal(); return; } throw new Error(`HTTP ${res.status}`); }
+    const data = await res.json();
+    renderVendasResumo(data);
+  } catch (e) {
+    grid.innerHTML = `<p style="color:var(--error);">Erro: ${e.message}</p>`;
+  }
+}
+
+function renderVendasResumo(lista) {
+  const grid = document.getElementById('vendas-grid');
+  if (!lista.length) {
+    grid.innerHTML = '<p style="color:var(--muted);font-size:13px;">Nenhuma venda registrada. Clique em "Sincronizar" para buscar do Mercado Livre.</p>';
+    return;
+  }
+  grid.innerHTML = lista.map(a => {
+    const titulo = `${esc(a.topico_nome || '—')} — ${a.num_exercicios}ex`;
+    const fat = a.faturamento != null ? `R$ ${parseFloat(a.faturamento).toFixed(2).replace('.', ',')}` : 'R$ 0,00';
+    return `
+      <div class="venda-card" onclick="openPedidosDrawer(${a.apostila_id}, '${titulo.replace(/'/g, "\\'")}')">
+        <div class="venda-card-title">${titulo}</div>
+        <div class="venda-card-stats">
+          <div class="venda-stat">
+            <span class="venda-stat-value">${a.total_vendas}</span>
+            <span class="venda-stat-label">vendas</span>
+          </div>
+          <div class="venda-stat">
+            <span class="venda-stat-value" style="font-size:16px;">${fat}</span>
+            <span class="venda-stat-label">faturamento</span>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function syncVendas(btn) {
+  btn.disabled = true;
+  btn.textContent = 'Sincronizando…';
+  try {
+    const res = await apiFetch('/api/admin/vendas/sincronizar', { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    document.getElementById('vendas-sync-info').textContent =
+      `${data.importados} pedido(s) sincronizado(s) — ${new Date(data.ultima_sincronizacao + 'Z').toLocaleString('pt-BR')}`;
+    showToast(`${data.importados} pedido(s) importado(s)`, 'success');
+    loadVendasResumo();
+  } catch (e) {
+    showToast(`Erro ao sincronizar: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↻ Sincronizar';
+  }
+}
+
+async function openPedidosDrawer(apostilaId, titulo) {
+  document.getElementById('drawer-apostila-titulo').textContent = titulo;
+  document.getElementById('pedidos-tbody').innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;"><div class="spinner-page"></div></td></tr>';
+  document.getElementById('pedidos-drawer').classList.add('open');
+
+  try {
+    const res = await apiFetch(`/api/admin/vendas?apostila_id=${apostilaId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const pedidos = await res.json();
+    document.getElementById('pedidos-tbody').innerHTML = pedidos.length
+      ? pedidos.map(p => {
+          const data = p.data_venda ? new Date(p.data_venda).toLocaleDateString('pt-BR') : '—';
+          const valor = `R$ ${parseFloat(p.valor || 0).toFixed(2).replace('.', ',')}`;
+          return `<tr>
+            <td>${data}</td>
+            <td>${esc(p.comprador_nickname || '—')}</td>
+            <td style="text-align:center;">${p.quantidade ?? 1}</td>
+            <td style="font-family:'JetBrains Mono',monospace;">${valor}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted);">Nenhum pedido encontrado.</td></tr>';
+  } catch (e) {
+    document.getElementById('pedidos-tbody').innerHTML = `<tr><td colspan="4" style="color:var(--error);">${e.message}</td></tr>`;
+  }
+}
+
+function closePedidosDrawer(e) {
+  if (e && e.target !== document.getElementById('pedidos-drawer')) return;
+  document.getElementById('pedidos-drawer').classList.remove('open');
+}
 </script>
 </body>
 </html>
