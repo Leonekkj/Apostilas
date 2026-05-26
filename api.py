@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 
 import database
 from ml import client as ml_client
+from ml import orders as ml_orders
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -118,6 +119,10 @@ class KitRequest(BaseModel):
 class AnuncioUpdate(BaseModel):
     preco: Optional[float] = None
     titulo: Optional[str] = None
+
+
+class LinkApostilaBody(BaseModel):
+    apostila_id: Optional[int]
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +446,87 @@ async def atualizar_anuncio_endpoint(anuncio_id: int, body: AnuncioUpdate, _auth
 
 
 # ---------------------------------------------------------------------------
+# Admin: Apostilas
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/apostilas")
+async def listar_apostilas_admin(auth=Depends(_require_auth)):
+    return await asyncio.to_thread(database.listar_todas_apostilas)
+
+
+# ---------------------------------------------------------------------------
+# Admin: Link apostila to anuncio
+# ---------------------------------------------------------------------------
+
+@app.patch("/api/admin/anuncios/{anuncio_id}/apostila")
+async def linkar_apostila_anuncio(
+    anuncio_id: int,
+    body: LinkApostilaBody,
+    auth=Depends(_require_auth),
+):
+    await asyncio.to_thread(
+        database.atualizar_anuncio, anuncio_id, apostila_id=body.apostila_id
+    )
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Admin: Vendas
+# ---------------------------------------------------------------------------
+
+@app.post("/api/admin/vendas/sincronizar")
+async def sincronizar_vendas(auth=Depends(_require_auth)):
+    from datetime import datetime
+
+    def _sync():
+        pedidos = ml_orders.buscar_pedidos_pagos()
+        importados = 0
+        for pedido in pedidos:
+            ml_order_id = str(pedido.get("id", ""))
+            if not ml_order_id:
+                continue
+            comprador_nickname = pedido.get("buyer", {}).get("nickname", "")
+            data_venda = pedido.get("date_created", "")
+            for item in pedido.get("order_items", []):
+                ml_item_id = item.get("item", {}).get("id", "")
+                valor = float(item.get("unit_price", 0))
+                quantidade = int(item.get("quantity", 1))
+                anuncio_id = database.buscar_anuncio_id_por_ml_id(ml_item_id)
+                database.salvar_venda(
+                    ml_order_id=ml_order_id,
+                    anuncio_id=anuncio_id,
+                    comprador_nickname=comprador_nickname,
+                    valor=valor,
+                    quantidade=quantidade,
+                    data_venda=data_venda,
+                )
+                importados += 1
+        return importados
+
+    importados = await asyncio.to_thread(_sync)
+    return {
+        "importados": importados,
+        "ultima_sincronizacao": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/api/admin/vendas/resumo")
+async def resumo_vendas(auth=Depends(_require_auth)):
+    return await asyncio.to_thread(database.resumo_vendas_por_apostila)
+
+
+@app.get("/api/admin/vendas")
+async def listar_vendas(
+    apostila_id: Optional[int] = None,
+    anuncio_id: Optional[int] = None,
+    auth=Depends(_require_auth),
+):
+    return await asyncio.to_thread(
+        database.listar_vendas, apostila_id, anuncio_id
+    )
+
+
+# ---------------------------------------------------------------------------
 # ML OAuth (no auth required)
 # ---------------------------------------------------------------------------
 
@@ -483,6 +569,44 @@ async def ml_callback(code: str):
         return RedirectResponse(url="/?ml=conectado")
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/ml/listing-types")
+async def ml_listing_types():
+    """Retorna os tipos de anúncio disponíveis para o vendedor na categoria configurada."""
+    import requests as _req
+    from ml import auth as ml_auth_module
+    try:
+        token = await asyncio.to_thread(ml_auth_module.get_valid_token)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    cat_id = os.getenv("ML_CATEGORIA_ID", "MLB1196")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Busca tipos de anúncio disponíveis para o vendedor
+    r = await asyncio.to_thread(
+        lambda: _req.get(
+            f"https://api.mercadolibre.com/users/me/listing_types",
+            headers=headers,
+        )
+    )
+    seller_types = r.json() if r.status_code == 200 else {"error": r.text}
+
+    # Busca tipos disponíveis para a categoria
+    r2 = await asyncio.to_thread(
+        lambda: _req.get(
+            f"https://api.mercadolibre.com/categories/{cat_id}/listing_types",
+            headers=headers,
+        )
+    )
+    cat_types = r2.json() if r2.status_code == 200 else {"error": r2.text}
+
+    return {
+        "categoria": cat_id,
+        "tipos_vendedor": seller_types,
+        "tipos_categoria": cat_types,
+    }
 
 
 # ---------------------------------------------------------------------------
