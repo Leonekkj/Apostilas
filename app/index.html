@@ -1160,44 +1160,6 @@
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════
-     PRODUTO MODAL
-═══════════════════════════════════════════ -->
-<div class="modal-backdrop" id="produto-modal">
-  <div class="modal">
-    <div class="modal-header">
-      <h3 class="modal-title">Novo Produto</h3>
-      <button class="modal-close" onclick="closeModal('produto-modal')">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">Tópico</label>
-        <select class="form-control" id="produto-topico">
-          <option value="">Carregando tópicos…</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Número de Exercícios</label>
-        <select class="form-control" id="produto-exercicios">
-          <option value="60">60 exercícios — R$ 29,90</option>
-          <option value="90">90 exercícios — R$ 34,90</option>
-          <option value="120">120 exercícios — R$ 39,90</option>
-          <option value="150">150 exercícios — R$ 44,90</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Preço (R$)</label>
-        <input type="number" class="form-control" id="produto-preco" step="0.01" min="0.01" placeholder="Ex: 29,90" />
-        <div style="font-size:12px;color:var(--muted);margin-top:4px;">Deixe em branco para usar o preço padrão da quantidade de exercícios</div>
-      </div>
-      <div id="produto-msg" style="font-size:13px;color:var(--muted);margin-top:-8px;"></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('produto-modal')">Cancelar</button>
-      <button class="btn btn-primary" id="btn-gerar-produto" onclick="gerarProduto()">Gerar Produto</button>
-    </div>
-  </div>
-</div>
 
 <!-- ═══════════════════════════════════════════
      KIT MODAL
@@ -1310,7 +1272,6 @@ function initTabFromHash() {
 // ─────────────────────────────────────────────
 function openModal(id) {
   document.getElementById(id).classList.add('open');
-  if (id === 'produto-modal') loadTopicos();
   if (id === 'kit-modal') populateKitApostilas();
 }
 
@@ -1439,47 +1400,6 @@ async function loadTopicos() {
   }
 }
 
-async function gerarProduto() {
-  const topicoId = parseInt(document.getElementById('produto-topico').value);
-  const numEx    = parseInt(document.getElementById('produto-exercicios').value);
-  const precoRaw = document.getElementById('produto-preco').value;
-  const msg      = document.getElementById('produto-msg');
-  const btn      = document.getElementById('btn-gerar-produto');
-
-  if (!topicoId) { showToast('Selecione um tópico', 'error'); return; }
-
-  const body = { topico_id: topicoId, num_exercicios: numEx };
-  if (precoRaw) {
-    const preco = parseFloat(precoRaw.replace(',', '.'));
-    if (isNaN(preco) || preco <= 0) { showToast('Preço inválido', 'error'); return; }
-    body.preco = preco;
-  }
-
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Gerando…';
-  msg.textContent = 'Isso pode levar alguns minutos…';
-
-  try {
-    const res = await apiFetch('/api/produto', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-
-    showToast(`Produto criado! ${data.anuncios?.length || 0} anúncios gerados.`, 'success');
-    closeModal('produto-modal');
-    await loadProdutos();
-    await loadStats();
-  } catch (e) {
-    msg.textContent = '';
-    showToast(`Erro: ${e.message}`, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Gerar Produto';
-    msg.textContent = '';
-  }
-}
 
 // ─────────────────────────────────────────────
 // Linha de Produto (200 exercícios → 6 apostilas)
