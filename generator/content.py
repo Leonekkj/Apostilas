@@ -77,26 +77,36 @@ Responda SEMPRE com JSON válido, sem texto extra antes ou depois do JSON.\
 # ---------------------------------------------------------------------------
 
 def _parse_json(text: str) -> object:
-    """Remove possíveis marcadores markdown e faz o parse."""
+    """Remove possíveis marcadores markdown e faz o parse com múltiplas tentativas."""
     text = text.strip()
-    # Remove blocos de código se o modelo os incluir mesmo assim
     if text.startswith("```"):
         lines = text.splitlines()
         text = "\n".join(lines[1:-1]) if lines[-1].strip() == "```" else "\n".join(lines[1:])
+
+    # Tentativa 1: parse direto
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # Groq às vezes gera sequências de escape inválidas (ex: \N, \-, \1).
-        # Substitui \X inválido por \\X para que o JSON fique bem formado.
-        sanitized = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
-        try:
-            return json.loads(sanitized)
-        except json.JSONDecodeError as exc2:
-            raise ValueError(
-                f"Resposta do Claude não é JSON válido.\n"
-                f"Erro: {exc2}\n"
-                f"Texto recebido:\n{text[:500]}"
-            ) from exc2
+        pass
+
+    # Tentativa 2: corrige sequências de escape inválidas (\N, \-, etc.)
+    sanitized = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
+    try:
+        return json.loads(sanitized)
+    except json.JSONDecodeError:
+        pass
+
+    # Tentativa 3: Groq às vezes coloca newlines literais dentro de strings JSON.
+    # Substitui newlines dentro de contexto de string por espaço.
+    flattened = sanitized.replace('\r\n', ' ').replace('\n', ' ')
+    try:
+        return json.loads(flattened)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Resposta do Claude não é JSON válido.\n"
+            f"Erro: {exc}\n"
+            f"Texto recebido:\n{text[:500]}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
