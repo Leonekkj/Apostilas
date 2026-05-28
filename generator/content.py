@@ -96,17 +96,28 @@ def _parse_json(text: str) -> object:
     except json.JSONDecodeError:
         pass
 
-    # Tentativa 3: Groq às vezes coloca newlines literais dentro de strings JSON.
-    # Substitui newlines dentro de contexto de string por espaço.
-    flattened = sanitized.replace('\r\n', ' ').replace('\n', ' ')
+    # Tentativa 3: normaliza newlines literais + corrige ) usado como ] (bug comum do Groq).
+    # Em JSON, ) nunca é caractere estrutural — substituir é sempre seguro.
+    repaired = re.sub(r'\)(?=[,\]}"\':\s])', ']', sanitized)
+    repaired = repaired.replace('\r\n', ' ').replace('\n', ' ')
     try:
-        return json.loads(flattened)
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Resposta do Claude não é JSON válido.\n"
-            f"Erro: {exc}\n"
-            f"Texto recebido:\n{text[:500]}"
-        ) from exc
+        return json.loads(repaired)
+    except json.JSONDecodeError:
+        pass
+
+    # Tentativa 4: json_repair como último recurso
+    try:
+        from json_repair import repair_json
+        fixed = repair_json(repaired)
+        if fixed:
+            return json.loads(fixed)
+    except Exception:
+        pass
+
+    raise ValueError(
+        f"Resposta do Claude não é JSON válido.\n"
+        f"Texto recebido:\n{text[:500]}"
+    )
 
 
 # ---------------------------------------------------------------------------
