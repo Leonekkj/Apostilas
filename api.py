@@ -147,6 +147,11 @@ class LinkApostilaBody(BaseModel):
     apostila_id: Optional[int]
 
 
+class AnuncioGerarPdfRequest(BaseModel):
+    topico_id: int
+    num_exercicios: int = Field(..., ge=1, le=200)
+
+
 # ---------------------------------------------------------------------------
 # Static / dashboard
 # ---------------------------------------------------------------------------
@@ -512,6 +517,59 @@ async def gerar_pdf_apostila(apostila_id: int, _auth=Depends(_require_auth)):
         raise HTTPException(status_code=500, detail=f"Erro ao gerar PDF: {exc}") from exc
 
     return {"pdf_url": _pdf_path_to_url(pdf_path), "cached": False}
+
+
+@app.post("/api/admin/anuncios/{anuncio_id}/gerar-pdf")
+async def gerar_pdf_anuncio(
+    anuncio_id: int,
+    body: AnuncioGerarPdfRequest,
+    _auth=Depends(_require_auth),
+):
+    from generator import content, pdf as gen_pdf
+
+    anuncio = await asyncio.to_thread(database.buscar_anuncio_por_id, anuncio_id)
+    if anuncio is None:
+        raise HTTPException(status_code=404, detail=f"Anúncio {anuncio_id} não encontrado")
+
+    # Idempotência: se já vinculado e PDF no disco, devolve cached
+    existing_apostila_id = anuncio.get("apostila_id")
+    if existing_apostila_id:
+        cached_path = anuncio.get("pdf_path")
+        if cached_path and os.path.exists(cached_path):
+            return {
+                "pdf_url": _pdf_path_to_url(cached_path),
+                "apostila_id": existing_apostila_id,
+                "cached": True,
+            }
+
+    topico = await asyncio.to_thread(database.buscar_topico_por_id, body.topico_id)
+    if topico is None:
+        raise HTTPException(status_code=404, detail=f"Tópico {body.topico_id} não encontrado")
+
+    try:
+        apostila_id = await asyncio.to_thread(
+            database.salvar_apostila, body.topico_id, body.num_exercicios, ""
+        )
+        await asyncio.to_thread(
+            database.atualizar_anuncio, anuncio_id, apostila_id=apostila_id
+        )
+        conteudo_json = await asyncio.to_thread(
+            content.gerar_conteudo, topico, body.num_exercicios
+        )
+        pdf_path = await asyncio.to_thread(
+            gen_pdf.gerar_pdf, apostila_id, topico, conteudo_json
+        )
+        await asyncio.to_thread(
+            database.salvar_conteudo_apostila, apostila_id, conteudo_json, pdf_path
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar PDF: {exc}") from exc
+
+    return {
+        "pdf_url": _pdf_path_to_url(pdf_path),
+        "apostila_id": apostila_id,
+        "cached": False,
+    }
 
 
 # ---------------------------------------------------------------------------
