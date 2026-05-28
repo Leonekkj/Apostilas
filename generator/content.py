@@ -39,7 +39,8 @@ def _claude_client() -> Anthropic | None:
 # Constantes de modelo / tokens
 # ---------------------------------------------------------------------------
 
-_MODEL = "llama-3.3-70b-versatile"   # Groq — gratuito, rápido, ótima qualidade
+_MODEL         = "llama-3.3-70b-versatile"   # Groq — modelo principal
+_MODEL_FALLBACK = "llama-3.1-8b-instant"       # Fallback quando quota do principal esgota
 _CLAUDE_MODEL = "claude-sonnet-4-6"
 
 _SYSTEM_EDITORIAL = """\
@@ -416,18 +417,31 @@ Retorne SOMENTE este JSON com exatamente {n} exercício(s) no array:
 """
 
     client = _client()
-    response = client.chat.completions.create(
-        model=_MODEL,
-        max_tokens=4000,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": _SYSTEM_CONTEUDO},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    raw = response.choices[0].message.content
-    parsed = _parse_json(raw)
-    return parsed.get("exercicios", [])
+    msgs = [
+        {"role": "system", "content": _SYSTEM_CONTEUDO},
+        {"role": "user", "content": prompt},
+    ]
+    for model in (_MODEL, _MODEL_FALLBACK):
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                max_tokens=4000,
+                response_format={"type": "json_object"},
+                messages=msgs,
+            )
+            raw = response.choices[0].message.content
+            parsed = _parse_json(raw)
+            return parsed.get("exercicios", [])
+        except Exception as exc:
+            if "rate_limit" in str(exc).lower() or "429" in str(exc):
+                logging.warning("[COGNIVITA] Quota esgotada para %s — tentando fallback %s", model, _MODEL_FALLBACK)
+                if model == _MODEL_FALLBACK:
+                    raise RuntimeError(
+                        "Quota diária do Groq esgotada em ambos os modelos. "
+                        "Aguarde até meia-noite (horário UTC) ou amanhã para resetar."
+                    ) from exc
+                continue
+            raise
 
 
 def _gerar_batch(topico: dict, n: int, offset: int = 0, fase: dict = None) -> list:
