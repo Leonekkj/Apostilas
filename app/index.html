@@ -936,6 +936,8 @@
     .produto-linha-card-meta { color: var(--muted); font-size: 0.85em; margin-bottom: 8px; }
     .produto-linha-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 0.85em; }
     .modal-info { font-size: 0.85em; color: var(--muted); margin-bottom: 12px; }
+    .preco-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .preco-grid label { display: flex; flex-direction: column; font-size: 0.8em; color: var(--muted); gap: 2px; }
   </style>
 </head>
 <body>
@@ -1078,14 +1080,17 @@
 
     <!-- Drawer de pedidos por apostila -->
     <div class="drawer-backdrop" id="pedidos-drawer" onclick="closePedidosDrawer(event)">
-      <div class="drawer">
+      <div class="drawer" style="max-width:780px;">
         <div class="drawer-header">
           <span class="drawer-title" id="drawer-apostila-titulo">Pedidos</span>
-          <button class="drawer-close" onclick="closePedidosDrawer()">✕</button>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="btn-gerar-pdf" class="btn btn-primary btn-sm" style="display:none;" onclick="gerarPdfApostila()">📄 Gerar PDF</button>
+            <button class="drawer-close" onclick="closePedidosDrawer()">✕</button>
+          </div>
         </div>
         <div class="drawer-body">
-          <table class="pedidos-table">
-            <thead>
+          <table class="pedidos-table" id="pedidos-table">
+            <thead id="pedidos-thead">
               <tr>
                 <th>Data</th>
                 <th>Comprador</th>
@@ -1138,7 +1143,7 @@
       <button class="modal-close" onclick="closeModal('linha-produto-modal')">✕</button>
     </div>
     <div class="modal-body">
-      <p class="modal-info">Serão gerados 200 exercícios → 6 apostilas (30, 60, 90, 120, 150, 200 exercícios) · R$ 14,90 a R$ 44,90</p>
+      <p class="modal-info">Serão gerados 200 exercícios → 6 apostilas com preços individuais.</p>
       <div class="form-group">
         <label class="form-label">Nome da linha</label>
         <input id="linha-produto-nome" type="text" class="form-control" placeholder="ex: Raciocínio Lógico Cognivita" maxlength="120">
@@ -1150,6 +1155,17 @@
       <div class="form-group">
         <label class="form-label">Série</label>
         <input id="linha-produto-serie" type="number" class="form-control" value="1" min="1" max="99">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Preços (R$)</label>
+        <div class="preco-grid">
+          <label>30 ex<input id="preco-30"  type="number" class="form-control" value="14.90" min="0" step="0.10"></label>
+          <label>60 ex<input id="preco-60"  type="number" class="form-control" value="19.90" min="0" step="0.10"></label>
+          <label>90 ex<input id="preco-90"  type="number" class="form-control" value="24.90" min="0" step="0.10"></label>
+          <label>120 ex<input id="preco-120" type="number" class="form-control" value="29.90" min="0" step="0.10"></label>
+          <label>150 ex<input id="preco-150" type="number" class="form-control" value="34.90" min="0" step="0.10"></label>
+          <label>200 ex<input id="preco-200" type="number" class="form-control" value="44.90" min="0" step="0.10"></label>
+        </div>
       </div>
       <div id="linha-produto-msg" style="font-size:13px;color:var(--muted);margin-top:-8px;"></div>
     </div>
@@ -1213,6 +1229,7 @@ let _produtos = [];
 let _kits = [];
 let _mlAuthUrl = null;
 let _topicos = [];
+let _drawerApostilaId = null;
 
 // ─────────────────────────────────────────────
 // Auth helpers
@@ -1286,7 +1303,7 @@ function closeModalEl(el) {
 // close on backdrop click
 document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
   backdrop.addEventListener('click', e => {
-    if (e.target === backdrop && backdrop.id !== 'token-modal') {
+    if (e.target === backdrop && backdrop.id !== 'token-modal' && backdrop.id !== 'linha-produto-modal') {
       backdrop.classList.remove('open');
     }
   });
@@ -1444,9 +1461,14 @@ async function gerarLinhaProduto() {
   msg.textContent = 'Gerando 200 exercícios e 6 apostilas. Isso pode levar 4–6 minutos…';
 
   try {
+    const precos = {};
+    [30, 60, 90, 120, 150, 200].forEach(n => {
+      const v = parseFloat(document.getElementById(`preco-${n}`)?.value);
+      precos[n] = isNaN(v) ? undefined : v;
+    });
     const res = await apiFetch('/api/produto', {
       method: 'POST',
-      body: JSON.stringify({ nome, topico_id: topicoId, serie }),
+      body: JSON.stringify({ nome, topico_id: topicoId, serie, precos }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
@@ -1916,10 +1938,15 @@ function renderVendasResumo(lista) {
     return;
   }
   grid.innerHTML = lista.map(a => {
-    const titulo = `${esc(a.topico_nome || '—')} — ${a.num_exercicios}ex`;
+    const titulo = a.apostila_id == null
+      ? esc(a.topico_nome || 'Outros anúncios')
+      : `${esc(a.topico_nome || '—')} — ${a.num_exercicios}ex`;
     const fat = a.faturamento != null ? `R$ ${parseFloat(a.faturamento).toFixed(2).replace('.', ',')}` : 'R$ 0,00';
+    const clickHandler = a.apostila_id != null
+      ? `onclick="openPedidosDrawer(${a.apostila_id}, '${titulo.replace(/'/g, "\\'")}')" style="cursor:pointer;"`
+      : `onclick="openOutrosDrawer()" style="cursor:pointer;"`;
     return `
-      <div class="venda-card" onclick="openPedidosDrawer(${a.apostila_id}, '${titulo.replace(/'/g, "\\'")}')">
+      <div class="venda-card" ${clickHandler}>
         <div class="venda-card-title">${titulo}</div>
         <div class="venda-card-stats">
           <div class="venda-stat">
@@ -1955,13 +1982,37 @@ async function syncVendas(btn) {
 }
 
 async function openPedidosDrawer(apostilaId, titulo) {
+  _drawerApostilaId = apostilaId;
   document.getElementById('drawer-apostila-titulo').textContent = titulo;
+  document.getElementById('pedidos-thead').innerHTML = `<tr><th>Data</th><th>Comprador</th><th>Qtd</th><th>Valor</th></tr>`;
   document.getElementById('pedidos-tbody').innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;"><div class="spinner-page"></div></td></tr>';
   document.getElementById('pedidos-drawer').classList.add('open');
 
+  // Inicializa botão PDF
+  const btnPdf = document.getElementById('btn-gerar-pdf');
+  btnPdf.style.display = '';
+  btnPdf.disabled = false;
+  btnPdf.className = 'btn btn-primary btn-sm';
+  btnPdf.textContent = '📄 Gerar PDF';
+  btnPdf.onclick = gerarPdfApostila;
+
+  // Verifica se PDF já existe
+  try {
+    const res = await apiFetch(`/api/admin/apostilas/${apostilaId}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.pdf_url) {
+        btnPdf.textContent = '⬇ Baixar PDF';
+        btnPdf.className = 'btn btn-ghost btn-sm';
+        btnPdf.onclick = () => window.open(data.pdf_url, '_blank');
+      }
+    }
+  } catch (_) { /* ignora erro na verificação de cache */ }
+
+  // Carrega pedidos
   try {
     const res = await apiFetch(`/api/admin/vendas?apostila_id=${apostilaId}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) { if (res.status === 401) { showTokenModal(); return; } throw new Error(`HTTP ${res.status}`); }
     const pedidos = await res.json();
     document.getElementById('pedidos-tbody').innerHTML = pedidos.length
       ? pedidos.map(p => {
@@ -1980,9 +2031,74 @@ async function openPedidosDrawer(apostilaId, titulo) {
   }
 }
 
-function closePedidosDrawer(e) {
-  if (e && e.target !== document.getElementById('pedidos-drawer')) return;
+async function openOutrosDrawer() {
+  _drawerApostilaId = null;
+  document.getElementById('btn-gerar-pdf').style.display = 'none';
+  document.getElementById('drawer-apostila-titulo').textContent = 'Outros anúncios — vendas não vinculadas';
+  document.getElementById('pedidos-thead').innerHTML = `<tr>
+    <th>Data</th><th>Anúncio</th><th>Comprador</th><th>Qtd</th><th>Valor</th><th>ML Order</th>
+  </tr>`;
+  document.getElementById('pedidos-tbody').innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;"><div class="spinner-page"></div></td></tr>';
+  document.getElementById('pedidos-drawer').classList.add('open');
+
+  try {
+    const res = await apiFetch('/api/admin/vendas?sem_apostila=true');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const pedidos = await res.json();
+    document.getElementById('pedidos-tbody').innerHTML = pedidos.length
+      ? pedidos.map(p => {
+          const data = p.data_venda ? new Date(p.data_venda).toLocaleDateString('pt-BR') : '—';
+          const valor = `R$ ${parseFloat(p.valor || 0).toFixed(2).replace('.', ',')}`;
+          const anuncio = esc(p.anuncio_titulo || '(sem anúncio)');
+          const mlOrder = p.ml_order_id || '—';
+          return `<tr>
+            <td style="white-space:nowrap;">${data}</td>
+            <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${anuncio}">${anuncio}</td>
+            <td style="font-size:12px;">${esc(p.comprador_nickname || '—')}</td>
+            <td style="text-align:center;">${p.quantidade ?? 1}</td>
+            <td style="font-family:'JetBrains Mono',monospace;white-space:nowrap;">${valor}</td>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);">${esc(mlOrder)}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted);">Nenhum pedido encontrado.</td></tr>';
+  } catch (e) {
+    document.getElementById('pedidos-tbody').innerHTML = `<tr><td colspan="6" style="color:var(--error);">${e.message}</td></tr>`;
+  }
+}
+
+function closePedidosDrawer(event) {
+  if (event && event.target !== document.getElementById('pedidos-drawer')) return;
   document.getElementById('pedidos-drawer').classList.remove('open');
+  document.getElementById('btn-gerar-pdf').style.display = 'none';
+  _drawerApostilaId = null;
+}
+
+async function gerarPdfApostila() {
+  if (!_drawerApostilaId) return;
+  const btn = document.getElementById('btn-gerar-pdf');
+  btn.disabled = true;
+  btn.textContent = '⏳ Gerando…';
+
+  try {
+    const res = await apiFetch(`/api/admin/apostilas/${_drawerApostilaId}/gerar-pdf`, { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    btn.textContent = '⬇ Baixar PDF';
+    btn.className = 'btn btn-ghost btn-sm';
+    btn.disabled = false;
+    btn.onclick = () => window.open(data.pdf_url, '_blank');
+    window.open(data.pdf_url, '_blank');
+    showToast('PDF gerado com sucesso!', 'success');
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '📄 Gerar PDF';
+    btn.className = 'btn btn-primary btn-sm';
+    btn.onclick = gerarPdfApostila;
+    showToast(`Erro ao gerar PDF: ${e.message}`, 'error');
+  }
 }
 
 async function linkApostila(anuncioId, selectEl) {
