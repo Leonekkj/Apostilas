@@ -411,14 +411,15 @@ Tópico: {nome_topico} — {descricao_topico}{contexto_fase}
 Crie exercícios criativos e variados relacionados ao tópico "{nome_topico}".
 Todos os exercícios devem ser adequados para idosos 60+, realizáveis em papel impresso.
 
-Retorne SOMENTE este JSON:
-{{"exercicios": [/* {n} exercício(s) do tipo {tipo} */]}}\
+Retorne SOMENTE este JSON com exatamente {n} exercício(s) no array:
+{{"exercicios": [...]}}\
 """
 
     client = _client()
     response = client.chat.completions.create(
         model=_MODEL,
         max_tokens=4000,
+        response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": _SYSTEM_CONTEUDO},
             {"role": "user", "content": prompt},
