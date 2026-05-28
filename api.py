@@ -478,11 +478,13 @@ async def buscar_apostila_admin(apostila_id: int, _auth=Depends(_require_auth)):
     apostila = await asyncio.to_thread(database.buscar_apostila_por_id, apostila_id)
     if apostila is None:
         raise HTTPException(status_code=404, detail=f"Apostila {apostila_id} não encontrada")
+    pdf_path = apostila.get("pdf_path")
+    pdf_url = _pdf_path_to_url(pdf_path) if pdf_path and os.path.exists(pdf_path) else None
     return {
         "id": apostila["id"],
         "topico_nome": apostila.get("topico_nome", ""),
         "num_exercicios": apostila["num_exercicios"],
-        "pdf_url": _pdf_path_to_url(apostila.get("pdf_path")),
+        "pdf_url": pdf_url,
     }
 
 
