@@ -329,80 +329,75 @@ Retorne um objeto para cada exercício. Nenhum texto extra.\
         return []
 
 
+_TIPO_CICLO = ["texto", "ligar", "completar", "texto", "sequencia", "tabela"]
+
 def _distribuir_tipos(n: int) -> list[str]:
-    """Distribui tipos de exercício: ~40% texto, ~60% visual (ligar/completar/sequencia/tabela)."""
-    ciclo = ["texto", "ligar", "completar", "texto", "sequencia", "tabela"]
-    return [ciclo[i % len(ciclo)] for i in range(n)]
+    """Retorna sequência de tipos para n exercícios (~40% texto, 60% visual)."""
+    return [_TIPO_CICLO[i % len(_TIPO_CICLO)] for i in range(n)]
 
 
-def _gerar_batch(topico: dict, n: int, offset: int = 0, fase: dict = None) -> list:
-    """Gera `n` exercícios começando do número `offset+1`. Retorna lista de dicts."""
+_FORMATOS_TIPO = {
+    "texto": """\
+Tipo: TEXTO — exercício discursivo onde o idoso escreve a resposta nas linhas abaixo.
+JSON de cada exercício:
+{{"numero": N, "tipo": "texto", "titulo": "...", "descricao": "...", "instrucoes": ["..."], "espaco_resposta": "linha", "dados_visuais": null}}
+espaco_resposta pode ser "linha" (linhas), "lista" (bullets) ou "quadrado" (caixa).""",
+
+    "ligar": """\
+Tipo: LIGAR — ligar coluna esquerda com coluna direita (3-5 pares).
+JSON de cada exercício:
+{{"numero": N, "tipo": "ligar", "titulo": "...", "descricao": "Ligue cada item ao seu par correto.", "instrucoes": ["Escreva o número ao lado de cada letra."], "espaco_resposta": "visual", "dados_visuais": {{"esquerda": ["item1","item2","item3"], "direita": ["par1","par2","par3"]}}}}
+Os pares devem ser temáticos e relacionados ao tópico.""",
+
+    "completar": """\
+Tipo: COMPLETAR — preencher lacunas em frases com palavras da lista.
+JSON de cada exercício:
+{{"numero": N, "tipo": "completar", "titulo": "...", "descricao": "Complete as frases com as palavras da lista.", "instrucoes": ["Escreva a palavra correta no espaço ___"], "espaco_resposta": "visual", "dados_visuais": {{"frases": ["Frase com ___ lacuna."], "opcoes": ["certa","errada1","errada2","errada3"]}}}}
+Inclua 2-3 frases e 4 opções (incluindo a correta). Use ___ para indicar a lacuna.""",
+
+    "sequencia": """\
+Tipo: SEQUÊNCIA — completar uma sequência lógica com o elemento que falta (???).
+JSON de cada exercício:
+{{"numero": N, "tipo": "sequencia", "titulo": "...", "descricao": "Qual elemento completa a sequência?", "instrucoes": ["Escreva sua resposta no espaço com ???"], "espaco_resposta": "visual", "dados_visuais": {{"items": ["elem1","elem2","???","elem4"]}}}}
+Sequências podem ser: dias da semana, meses, números, estações, letras, padrões lógicos.""",
+
+    "tabela": """\
+Tipo: TABELA — preencher tabela com colunas definidas.
+JSON de cada exercício:
+{{"numero": N, "tipo": "tabela", "titulo": "...", "descricao": "Complete a tabela abaixo.", "instrucoes": ["Preencha cada célula com a informação solicitada."], "espaco_resposta": "visual", "dados_visuais": {{"colunas": ["Coluna1","Coluna2"], "linhas": 5}}}}
+Use 2-3 colunas relevantes ao tópico e 4-5 linhas.""",
+}
+
+
+def _gerar_tipo_unico(topico: dict, tipo: str, n: int, fase: dict = None) -> list:
+    """Gera n exercícios de UM único tipo. Numerados de 1 a n (remapeados depois)."""
     nome_topico = topico.get("nome", topico.get("name", str(topico)))
     descricao_topico = topico.get("descricao", topico.get("description", ""))
-    inicio = offset + 1
-    fim = offset + n
-
-    tipos = _distribuir_tipos(n)
-    lista_tipos = "\n".join(
-        f"  Exercício {inicio + i}: tipo OBRIGATÓRIO \"{t}\"" for i, t in enumerate(tipos)
-    )
+    formato = _FORMATOS_TIPO.get(tipo, _FORMATOS_TIPO["texto"])
 
     contexto_fase = ""
     if fase:
         contexto_fase = (
-            f"\nFase cognitiva atual: {fase.get('nome', '')}"
-            f"\nObjetivo da fase: {fase.get('objetivo', '')}"
-            f"\nSeção: {fase.get('secao', '')}"
-            f"\nOs exercícios devem ser coerentes com este objetivo e nível cognitivo.\n"
+            f"\nFase: {fase.get('nome', '')} — {fase.get('objetivo', '')}\n"
         )
 
     prompt = f"""\
-Gere exatamente {n} exercícios de estimulação cognitiva para o tópico abaixo.
-Numere os exercícios de {inicio} a {fim}.
+Gere exatamente {n} exercício(s) de estimulação cognitiva.
+Tópico: {nome_topico} — {descricao_topico}{contexto_fase}
 
-Tópico: {nome_topico}
-Descrição: {descricao_topico}
-{contexto_fase}
-DISTRIBUIÇÃO DE TIPOS OBRIGATÓRIA — siga EXATAMENTE esta ordem:
-{lista_tipos}
+{formato}
 
-REGRAS ABSOLUTAS:
-- O campo "tipo" de cada exercício DEVE corresponder EXATAMENTE ao tipo indicado acima
-- NÃO altere a ordem nem os tipos especificados
-- Exercícios do tipo "texto" usam espaco_resposta "linha"|"quadrado"|"lista" e dados_visuais null
-- Exercícios visuais usam espaco_resposta "visual" e preenchem dados_visuais conforme o tipo
+Crie exercícios criativos e variados relacionados ao tópico "{nome_topico}".
+Todos os exercícios devem ser adequados para idosos 60+, realizáveis em papel impresso.
 
-Formatos de dados_visuais por tipo:
-- "ligar": {{"esquerda": ["item1","item2","item3"], "direita": ["par1","par2","par3"]}} — 3 a 5 pares temáticos relacionados a {nome_topico}
-- "completar": {{"frases": ["Frase com ___ lacuna.","Outra ___ frase."], "opcoes": ["palavra1","palavra2","palavra3","palavra4"]}} — 2-3 frases, 4 opções incluindo a correta
-- "sequencia": {{"items": ["elem1","elem2","???","elem4"]}} — 4-5 itens, "???" marca a lacuna
-- "tabela": {{"colunas": ["Col1","Col2","Col3"], "linhas": 5}} — 2-3 colunas relevantes ao tópico, 4-5 linhas
-
-Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
-
-{{
-  "topico": "{nome_topico}",
-  "num_exercicios": {n},
-  "exercicios": [
-    {{
-      "numero": {inicio},
-      "tipo": "{tipos[0]}",
-      "titulo": "Título curto e motivador",
-      "descricao": "Descrição clara do exercício",
-      "instrucoes": ["Instrução 1", "Instrução 2"],
-      "espaco_resposta": "linha",
-      "dados_visuais": null
-    }}
-  ]
-}}
-
-Gere TODOS os {n} exercícios no array, respeitando OBRIGATORIAMENTE os tipos prescritos.\
+Retorne SOMENTE este JSON:
+{{"exercicios": [/* {n} exercício(s) do tipo {tipo} */]}}\
 """
 
     client = _client()
     response = client.chat.completions.create(
         model=_MODEL,
-        max_tokens=8000,
+        max_tokens=4000,
         messages=[
             {"role": "system", "content": _SYSTEM_CONTEUDO},
             {"role": "user", "content": prompt},
@@ -411,6 +406,35 @@ Gere TODOS os {n} exercícios no array, respeitando OBRIGATORIAMENTE os tipos pr
     raw = response.choices[0].message.content
     parsed = _parse_json(raw)
     return parsed.get("exercicios", [])
+
+
+def _gerar_batch(topico: dict, n: int, offset: int = 0, fase: dict = None) -> list:
+    """Gera n exercícios com distribuição garantida de tipos (um tipo por chamada Groq)."""
+    from collections import Counter, defaultdict
+
+    tipos_seq = _distribuir_tipos(n)
+    contagem = Counter(tipos_seq)
+
+    # Gera cada tipo em chamada separada
+    por_tipo: dict[str, list] = {}
+    for tipo, count in contagem.items():
+        batch = _gerar_tipo_unico(topico, tipo, count, fase=fase)
+        por_tipo[tipo] = batch
+
+    # Monta na ordem correta e atribui números
+    idx: dict[str, int] = defaultdict(int)
+    resultado = []
+    for i, tipo in enumerate(tipos_seq):
+        numero = offset + i + 1
+        lista = por_tipo.get(tipo, [])
+        j = idx[tipo]
+        if j < len(lista):
+            ex = dict(lista[j])
+            ex["numero"] = numero
+            ex["tipo"] = tipo  # garante o tipo correto
+            resultado.append(ex)
+            idx[tipo] += 1
+    return resultado
 
 
 def gerar_conteudo(topico: dict, num_exercicios: int) -> str:

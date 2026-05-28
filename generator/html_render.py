@@ -204,7 +204,7 @@ body {{
 }}
 .answer-line {{
   border-top: 1px solid {COLOR_BORDER};
-  margin-bottom: 7mm;
+  margin-bottom: 5mm;
 }}
 .answer-box {{
   border: 1px solid {COLOR_BORDER};
@@ -750,7 +750,7 @@ def _answer_space_html(espaco: str) -> str:
             for _ in range(5)
         )
         return f'<div class="answer-label">Sua resposta:</div><ul class="answer-bullets">{items}</ul>'
-    lines = "".join('<div class="answer-line"></div>' for _ in range(8))
+    lines = "".join('<div class="answer-line"></div>' for _ in range(5))
     return f'<div class="answer-label">Sua resposta:</div>{lines}'
 
 
