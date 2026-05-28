@@ -2036,9 +2036,9 @@ async function openOutrosDrawer() {
   document.getElementById('btn-gerar-pdf').style.display = 'none';
   document.getElementById('drawer-apostila-titulo').textContent = 'Outros anúncios — vendas não vinculadas';
   document.getElementById('pedidos-thead').innerHTML = `<tr>
-    <th>Data</th><th>Anúncio</th><th>Comprador</th><th>Qtd</th><th>Valor</th><th>ML Order</th>
+    <th>Data</th><th>Anúncio</th><th>Comprador</th><th>Qtd</th><th>Valor</th><th>ML Order</th><th>PDF</th>
   </tr>`;
-  document.getElementById('pedidos-tbody').innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;"><div class="spinner-page"></div></td></tr>';
+  document.getElementById('pedidos-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;"><div class="spinner-page"></div></td></tr>';
   document.getElementById('pedidos-drawer').classList.add('open');
 
   try {
@@ -2051,18 +2051,23 @@ async function openOutrosDrawer() {
           const valor = `R$ ${parseFloat(p.valor || 0).toFixed(2).replace('.', ',')}`;
           const anuncio = esc(p.anuncio_titulo || '(sem anúncio)');
           const mlOrder = p.ml_order_id || '—';
+          const anuncioId = p.anuncio_id || '';
+          const pdfCell = anuncioId
+            ? `<td id="pdf-cell-${anuncioId}"><button class="btn btn-primary btn-sm" onclick="mostrarFormPdf('${anuncioId}')">📄 Gerar</button></td>`
+            : `<td>—</td>`;
           return `<tr>
             <td style="white-space:nowrap;">${data}</td>
-            <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${anuncio}">${anuncio}</td>
+            <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${anuncio}">${anuncio}</td>
             <td style="font-size:12px;">${esc(p.comprador_nickname || '—')}</td>
             <td style="text-align:center;">${p.quantidade ?? 1}</td>
             <td style="font-family:'JetBrains Mono',monospace;white-space:nowrap;">${valor}</td>
             <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);">${esc(mlOrder)}</td>
+            ${pdfCell}
           </tr>`;
         }).join('')
-      : '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted);">Nenhum pedido encontrado.</td></tr>';
+      : '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);">Nenhum pedido encontrado.</td></tr>';
   } catch (e) {
-    document.getElementById('pedidos-tbody').innerHTML = `<tr><td colspan="6" style="color:var(--error);">${e.message}</td></tr>`;
+    document.getElementById('pedidos-tbody').innerHTML = `<tr><td colspan="7" style="color:var(--error);">${e.message}</td></tr>`;
   }
 }
 
@@ -2071,6 +2076,81 @@ function closePedidosDrawer(event) {
   document.getElementById('pedidos-drawer').classList.remove('open');
   document.getElementById('btn-gerar-pdf').style.display = 'none';
   _drawerApostilaId = null;
+}
+
+async function mostrarFormPdf(anuncioId) {
+  const cell = document.getElementById(`pdf-cell-${anuncioId}`);
+  if (!cell) return;
+
+  // Carrega tópicos se ainda não carregados
+  if (_topicos.length === 0) {
+    try {
+      const res = await apiFetch('/api/topicos');
+      if (res.ok) _topicos = await res.json();
+    } catch (_) {}
+  }
+
+  const topicoOptions = _topicos.map(t =>
+    `<option value="${t.id}">${esc(t.nome)}</option>`
+  ).join('');
+
+  cell.innerHTML = `
+    <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+      <select id="sel-topico-${anuncioId}" class="form-control" style="font-size:11px;padding:3px 6px;height:28px;min-width:110px;">
+        <option value="">Tópico…</option>
+        ${topicoOptions}
+      </select>
+      <select id="sel-nexs-${anuncioId}" class="form-control" style="font-size:11px;padding:3px 6px;height:28px;width:70px;">
+        <option value="">Qtd…</option>
+        <option value="30">30</option>
+        <option value="60">60</option>
+        <option value="90">90</option>
+        <option value="120">120</option>
+        <option value="150">150</option>
+        <option value="200">200</option>
+      </select>
+      <button class="btn btn-primary btn-sm" style="height:28px;padding:0 8px;" onclick="confirmarGeracaoPdf('${anuncioId}')">✓</button>
+      <button class="btn btn-ghost btn-sm" style="height:28px;padding:0 8px;" onclick="cancelarFormPdf('${anuncioId}')">✕</button>
+    </div>`;
+}
+
+async function confirmarGeracaoPdf(anuncioId) {
+  const topicoId = document.getElementById(`sel-topico-${anuncioId}`)?.value;
+  const numExs = document.getElementById(`sel-nexs-${anuncioId}`)?.value;
+
+  if (!topicoId || !numExs) {
+    showToast('Selecione o tópico e a quantidade de exercícios.', 'error');
+    return;
+  }
+
+  const cell = document.getElementById(`pdf-cell-${anuncioId}`);
+  cell.innerHTML = `<span style="font-size:12px;color:var(--muted);">⏳ Gerando…</span>`;
+
+  try {
+    const res = await apiFetch(`/api/admin/anuncios/${anuncioId}/gerar-pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topico_id: parseInt(topicoId), num_exercicios: parseInt(numExs) }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    cell.innerHTML = `<button class="btn btn-ghost btn-sm" onclick="window.open('${data.pdf_url}','_blank')">⬇ Baixar PDF</button>`;
+    window.open(data.pdf_url, '_blank');
+    showToast('PDF gerado com sucesso!', 'success');
+  } catch (e) {
+    cell.innerHTML = `<button class="btn btn-primary btn-sm" onclick="mostrarFormPdf('${anuncioId}')">📄 Gerar</button>`;
+    showToast(`Erro: ${e.message}`, 'error');
+  }
+}
+
+function cancelarFormPdf(anuncioId) {
+  const cell = document.getElementById(`pdf-cell-${anuncioId}`);
+  if (cell) {
+    cell.innerHTML = `<button class="btn btn-primary btn-sm" onclick="mostrarFormPdf('${anuncioId}')">📄 Gerar</button>`;
+  }
 }
 
 async function gerarPdfApostila() {
