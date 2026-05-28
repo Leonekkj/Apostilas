@@ -56,12 +56,15 @@ app.mount("/output", StaticFiles(directory=_OUTPUT_DIR), name="output")
 
 
 def _pdf_path_to_url(pdf_path: str) -> str | None:
-    """Converte filesystem path do PDF em URL relativa para o browser."""
+    """Converte filesystem path do PDF em URL relativa com cache-busting."""
     if not pdf_path:
         return None
     try:
         rel = os.path.relpath(pdf_path, os.path.dirname(os.path.abspath(__file__)))
-        return "/" + rel.replace("\\", "/")
+        url = "/" + rel.replace("\\", "/")
+        if os.path.exists(pdf_path):
+            url += f"?v={int(os.path.getmtime(pdf_path))}"
+        return url
     except ValueError:
         return None
 
