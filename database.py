@@ -75,6 +75,14 @@ def criar_tabelas() -> None:
                 data_venda          TEXT,
                 sincronizado_em     TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS produtos (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome      TEXT NOT NULL,
+                serie     INTEGER DEFAULT 1,
+                topico_id INTEGER REFERENCES topicos(id),
+                criado_em TEXT DEFAULT (datetime('now'))
+            );
         """)
 
         # Migration: add new columns to anuncios (SQLite workaround for ADD COLUMN IF NOT EXISTS).
@@ -88,6 +96,14 @@ def criar_tabelas() -> None:
         ]:
             try:
                 conn.execute(f"ALTER TABLE anuncios ADD COLUMN {col_name} {col_def}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
+        for col_name, col_def in [
+            ("produto_id", "INTEGER"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE apostilas ADD COLUMN {col_name} {col_def}")
             except sqlite3.OperationalError:
                 pass  # column already exists
 
@@ -156,13 +172,13 @@ def buscar_topico(slug: str) -> Optional[dict]:
         conn.close()
 
 
-def salvar_apostila(topico_id: int, num_exercicios: int, conteudo_json: str) -> int:
+def salvar_apostila(topico_id: int, num_exercicios: int, conteudo_json: str, produto_id=None) -> int:
     """Insere uma nova apostila e retorna o id gerado."""
     conn = _get_conn()
     try:
         cur = conn.execute(
-            "INSERT INTO apostilas (topico_id, num_exercicios, conteudo_json) VALUES (?, ?, ?)",
-            (topico_id, num_exercicios, conteudo_json),
+            "INSERT INTO apostilas (topico_id, num_exercicios, conteudo_json, produto_id) VALUES (?, ?, ?, ?)",
+            (topico_id, num_exercicios, conteudo_json, produto_id),
         )
         conn.commit()
         return cur.lastrowid
@@ -191,6 +207,19 @@ def atualizar_pdf_apostila(apostila_id: int, pdf_path: str) -> None:
         conn.execute(
             "UPDATE apostilas SET pdf_path = ? WHERE id = ?",
             (pdf_path, apostila_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def salvar_conteudo_apostila(apostila_id: int, conteudo_json: str, pdf_path: str) -> None:
+    """Salva o conteúdo gerado e o caminho do PDF de uma apostila."""
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "UPDATE apostilas SET conteudo_json = ?, pdf_path = ? WHERE id = ?",
+            (conteudo_json, pdf_path, apostila_id),
         )
         conn.commit()
     finally:
@@ -654,6 +683,7 @@ def salvar_venda(
 def listar_vendas(
     apostila_id: Optional[int] = None,
     anuncio_id: Optional[int] = None,
+    sem_apostila: bool = False,
 ) -> list[dict]:
     """Lista vendas com JOIN em anuncios, apostilas e topicos."""
     conn = _get_conn()
@@ -661,9 +691,10 @@ def listar_vendas(
         sql = """
             SELECT
                 v.*,
-                an.titulo  AS anuncio_titulo,
-                an.ml_id   AS anuncio_ml_id,
-                tp.nome    AS topico_nome,
+                an.titulo      AS anuncio_titulo,
+                an.ml_id       AS anuncio_ml_id,
+                tp.nome        AS topico_nome,
+                ap.id          AS apostila_id,
                 ap.num_exercicios
             FROM vendas v
             LEFT JOIN anuncios  an ON v.anuncio_id   = an.id
@@ -678,6 +709,8 @@ def listar_vendas(
         if anuncio_id is not None:
             sql += " AND v.anuncio_id = ?"
             params.append(anuncio_id)
+        if sem_apostila:
+            sql += " AND (v.anuncio_id IS NULL OR an.apostila_id IS NULL)"
         sql += " ORDER BY v.data_venda DESC"
         cur = conn.execute(sql, params)
         return [dict(row) for row in cur.fetchall()]
@@ -686,14 +719,10 @@ def listar_vendas(
 
 
 def resumo_vendas_por_apostila() -> list[dict]:
-    """Agrega vendas por apostila: total de vendas e faturamento.
-
-    Vendas com anuncio_id=NULL (listing não importado) ou anúncio sem
-    apostila_id linkada são intencionalmente excluídas — não podem ser
-    atribuídas a uma apostila específica.
-    """
+    """Agrega vendas por apostila. Vendas sem apostila vinculada aparecem como apostila_id=None."""
     conn = _get_conn()
     try:
+        # Vendas vinculadas a uma apostila
         cur = conn.execute("""
             SELECT
                 ap.id                          AS apostila_id,
@@ -708,7 +737,26 @@ def resumo_vendas_por_apostila() -> list[dict]:
             GROUP BY ap.id, tp.nome, ap.num_exercicios
             ORDER BY total_vendas DESC
         """)
-        return [dict(row) for row in cur.fetchall()]
+        rows = [dict(row) for row in cur.fetchall()]
+
+        # Vendas sem apostila vinculada (anuncio_id null ou anuncio sem apostila)
+        cur2 = conn.execute("""
+            SELECT COUNT(v.id) AS total_vendas, SUM(v.valor * v.quantidade) AS faturamento
+            FROM vendas v
+            LEFT JOIN anuncios an ON v.anuncio_id = an.id
+            WHERE v.anuncio_id IS NULL OR an.apostila_id IS NULL
+        """)
+        outros = dict(cur2.fetchone())
+        if outros["total_vendas"] and outros["total_vendas"] > 0:
+            rows.append({
+                "apostila_id": None,
+                "topico_nome": "Outros anúncios",
+                "num_exercicios": None,
+                "total_vendas": outros["total_vendas"],
+                "faturamento": outros["faturamento"],
+            })
+
+        return rows
     finally:
         conn.close()
 
@@ -724,6 +772,64 @@ def listar_todas_apostilas() -> list[dict]:
             ORDER BY tp.nome, ap.num_exercicios
         """)
         return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def criar_produto(nome: str, topico_id: int, serie: int = 1) -> int:
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO produtos (nome, serie, topico_id) VALUES (?, ?, ?)",
+            (nome, serie, topico_id),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def listar_produtos_com_apostilas() -> list:
+    conn = _get_conn()
+    try:
+        produtos = conn.execute(
+            "SELECT p.*, tp.nome AS topico_nome FROM produtos p LEFT JOIN topicos tp ON p.topico_id = tp.id ORDER BY p.id DESC"
+        ).fetchall()
+        result = []
+        for prod in produtos:
+            pd = dict(prod)
+            apostilas = conn.execute(
+                """SELECT ap.id, ap.num_exercicios, ap.pdf_path, ap.criado_em,
+                          COUNT(an.id) AS total_anuncios,
+                          SUM(CASE WHEN an.status='publicado' THEN 1 ELSE 0 END) AS anuncios_publicados
+                   FROM apostilas ap LEFT JOIN anuncios an ON an.apostila_id = ap.id
+                   WHERE ap.produto_id = ? GROUP BY ap.id ORDER BY ap.num_exercicios""",
+                (pd["id"],)
+            ).fetchall()
+            pd["apostilas"] = [dict(a) for a in apostilas]
+            result.append(pd)
+        return result
+    finally:
+        conn.close()
+
+
+def listar_apostilas_por_produto(produto_id: int) -> list:
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT * FROM apostilas WHERE produto_id = ? ORDER BY num_exercicios",
+            (produto_id,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def deletar_produto(produto_id: int) -> None:
+    conn = _get_conn()
+    try:
+        conn.execute("DELETE FROM produtos WHERE id = ?", (produto_id,))
+        conn.commit()
     finally:
         conn.close()
 
