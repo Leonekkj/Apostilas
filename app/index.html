@@ -2086,8 +2086,12 @@ async function mostrarFormPdf(anuncioId) {
   if (_topicos.length === 0) {
     try {
       const res = await apiFetch('/api/topicos');
-      if (res.ok) _topicos = await res.json();
-    } catch (_) {}
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      _topicos = await res.json();
+    } catch (e) {
+      showToast(`Erro ao carregar tópicos: ${e.message}`, 'error');
+      return;
+    }
   }
 
   const topicoOptions = _topicos.map(t =>
