@@ -55,6 +55,17 @@ os.makedirs(_OUTPUT_DIR, exist_ok=True)
 app.mount("/output", StaticFiles(directory=_OUTPUT_DIR), name="output")
 
 
+def _pdf_path_to_url(pdf_path: str) -> str | None:
+    """Converte filesystem path do PDF em URL relativa para o browser."""
+    if not pdf_path:
+        return None
+    try:
+        rel = os.path.relpath(pdf_path, os.path.dirname(os.path.abspath(__file__)))
+        return "/" + rel.replace("\\", "/")
+    except ValueError:
+        return None
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     await asyncio.to_thread(database.criar_tabelas)
@@ -119,6 +130,7 @@ class ProdutoLinhaRequest(BaseModel):
     nome: str = Field(..., min_length=1, max_length=120)
     topico_id: int
     serie: int = Field(default=1, ge=1, le=99)
+    precos: Optional[dict] = None  # {30: 14.90, 60: 19.90, ...} — sobrescreve _PRECOS_PRODUTO
 
 
 class KitRequest(BaseModel):
@@ -223,7 +235,8 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             generated_files.append(image_path)
 
             titulo = await asyncio.to_thread(content.gerar_titulo_apostila_produto, body.nome, num_ex)
-            preco = _PRECOS_PRODUTO.get(num_ex, 29.90)
+            tabela = body.precos or _PRECOS_PRODUTO
+            preco = float(tabela.get(str(num_ex), tabela.get(num_ex, _PRECOS_PRODUTO.get(num_ex, 29.90))))
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,
                 apostila_id, "fisico", posicao, titulo, preco, posicao, "", None, descricao,
@@ -455,6 +468,52 @@ async def listar_apostilas_admin(auth=Depends(_require_auth)):
     return await asyncio.to_thread(database.listar_todas_apostilas)
 
 
+@app.get("/api/admin/apostilas/{apostila_id}")
+async def buscar_apostila_admin(apostila_id: int, _auth=Depends(_require_auth)):
+    apostila = await asyncio.to_thread(database.buscar_apostila_por_id, apostila_id)
+    if apostila is None:
+        raise HTTPException(status_code=404, detail=f"Apostila {apostila_id} não encontrada")
+    return {
+        "id": apostila["id"],
+        "topico_nome": apostila.get("topico_nome", ""),
+        "num_exercicios": apostila["num_exercicios"],
+        "pdf_url": _pdf_path_to_url(apostila.get("pdf_path")),
+    }
+
+
+@app.post("/api/admin/apostilas/{apostila_id}/gerar-pdf")
+async def gerar_pdf_apostila(apostila_id: int, _auth=Depends(_require_auth)):
+    from generator import content, pdf as gen_pdf
+
+    apostila = await asyncio.to_thread(database.buscar_apostila_por_id, apostila_id)
+    if apostila is None:
+        raise HTTPException(status_code=404, detail=f"Apostila {apostila_id} não encontrada")
+
+    # Cache: se o arquivo já existe no disco, devolve sem regerar
+    cached_path = apostila.get("pdf_path")
+    if cached_path and os.path.exists(cached_path):
+        return {"pdf_url": _pdf_path_to_url(cached_path), "cached": True}
+
+    # Monta dict de tópico compatível com gerar_conteudo()
+    topico = {
+        "id": apostila["topico_id"],
+        "nome": apostila.get("topico_nome", ""),
+        "descricao": "",
+    }
+    num_exercicios = apostila["num_exercicios"]
+
+    try:
+        conteudo_json = await asyncio.to_thread(content.gerar_conteudo, topico, num_exercicios)
+        pdf_path = await asyncio.to_thread(gen_pdf.gerar_pdf, apostila_id, topico, conteudo_json)
+        await asyncio.to_thread(
+            database.salvar_conteudo_apostila, apostila_id, conteudo_json, pdf_path
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar PDF: {exc}") from exc
+
+    return {"pdf_url": _pdf_path_to_url(pdf_path), "cached": False}
+
+
 # ---------------------------------------------------------------------------
 # Admin: Link apostila to anuncio
 # ---------------------------------------------------------------------------
@@ -520,10 +579,11 @@ async def resumo_vendas(auth=Depends(_require_auth)):
 async def listar_vendas(
     apostila_id: Optional[int] = None,
     anuncio_id: Optional[int] = None,
+    sem_apostila: bool = False,
     auth=Depends(_require_auth),
 ):
     return await asyncio.to_thread(
-        database.listar_vendas, apostila_id, anuncio_id
+        database.listar_vendas, apostila_id, anuncio_id, sem_apostila
     )
 
 
