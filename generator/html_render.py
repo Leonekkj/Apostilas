@@ -160,6 +160,10 @@ body {{
 .exercise {{
   margin-bottom: 8mm;
   page-break-inside: avoid;
+  break-inside: avoid;
+}}
+.exercises-block {{
+  /* Fluxo natural — Playwright gerencia quebras de página */
 }}
 .exercise-header {{
   background: {COLOR_DARK};
@@ -880,11 +884,8 @@ def render_apostila_html(topico: dict, conteudo_json: str) -> str:
             conteudo_interno += _fase_abertura_html(fase)
             numeros = fase.get("exercicios_numeros", [])
             fase_exercicios = [ex_por_numero[n] for n in numeros if n in ex_por_numero]
-            for i in range(0, len(fase_exercicios), 2):
-                ex1 = _exercise_html(fase_exercicios[i])
-                ex2 = _exercise_html(fase_exercicios[i + 1]) if i + 1 < len(fase_exercicios) else ""
-                separator = '<hr class="exercise-separator">' if ex2 else ""
-                conteudo_interno += f'<div class="page">{ex1}{separator}{ex2}</div>'
+            exercises_html = "".join(_exercise_html(e) for e in fase_exercicios)
+            conteudo_interno += f'<div class="exercises-block">{exercises_html}</div>'
 
         rotina = _rotina_semanal_html(conteudo.get("rotina_semanal", {}))
         gabarito = _gabarito_html(conteudo.get("gabarito", []))
@@ -893,13 +894,8 @@ def render_apostila_html(topico: dict, conteudo_json: str) -> str:
         body = f"{cover}{apresentacao}{indice}{conteudo_interno}{rotina}{gabarito}{contracapa}"
     else:
         instructions = _instructions_html(nome_topico, num_exercicios)
-        exercises_html = ""
-        for i in range(0, len(exercicios), 2):
-            ex1 = _exercise_html(exercicios[i])
-            ex2 = _exercise_html(exercicios[i + 1]) if i + 1 < len(exercicios) else ""
-            separator = '<hr class="exercise-separator">' if ex2 else ""
-            exercises_html += f'<div class="page">{ex1}{separator}{ex2}</div>'
-        body = f"{cover}{instructions}{exercises_html}"
+        exercises_html = "".join(_exercise_html(e) for e in exercicios)
+        body = f"{cover}{instructions}<div class=\"exercises-block\">{exercises_html}</div>"
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">

@@ -329,12 +329,23 @@ Retorne um objeto para cada exercício. Nenhum texto extra.\
         return []
 
 
+def _distribuir_tipos(n: int) -> list[str]:
+    """Distribui tipos de exercício: ~40% texto, ~60% visual (ligar/completar/sequencia/tabela)."""
+    ciclo = ["texto", "ligar", "completar", "texto", "sequencia", "tabela"]
+    return [ciclo[i % len(ciclo)] for i in range(n)]
+
+
 def _gerar_batch(topico: dict, n: int, offset: int = 0, fase: dict = None) -> list:
     """Gera `n` exercícios começando do número `offset+1`. Retorna lista de dicts."""
     nome_topico = topico.get("nome", topico.get("name", str(topico)))
     descricao_topico = topico.get("descricao", topico.get("description", ""))
     inicio = offset + 1
     fim = offset + n
+
+    tipos = _distribuir_tipos(n)
+    lista_tipos = "\n".join(
+        f"  Exercício {inicio + i}: tipo OBRIGATÓRIO \"{t}\"" for i, t in enumerate(tipos)
+    )
 
     contexto_fase = ""
     if fase:
@@ -352,20 +363,22 @@ Numere os exercícios de {inicio} a {fim}.
 Tópico: {nome_topico}
 Descrição: {descricao_topico}
 {contexto_fase}
-Os exercícios devem:
-- Ser adequados para idosos acima de 60 anos
-- Usar linguagem simples e acessível
-- Ser realizados em papel impresso (sem tecnologia)
-- Variar entre os tipos disponíveis: pelo menos 40% devem ser "ligar", "completar", "sequencia" ou "tabela"
+DISTRIBUIÇÃO DE TIPOS OBRIGATÓRIA — siga EXATAMENTE esta ordem:
+{lista_tipos}
 
-Tipos de exercício disponíveis:
-- "texto": exercício discursivo com espaço para resposta escrita (espaco_resposta: "linha"|"quadrado"|"lista")
-- "ligar": ligar coluna da esquerda com coluna da direita (3 a 5 pares)
-- "completar": preencher lacunas em frases (use ___ para indicar lacunas, forneça opcoes)
-- "sequencia": completar sequência lógica (coloque "???" onde o idoso deve responder)
-- "tabela": preencher tabela com colunas definidas (2 a 3 colunas, 4 a 6 linhas)
+REGRAS ABSOLUTAS:
+- O campo "tipo" de cada exercício DEVE corresponder EXATAMENTE ao tipo indicado acima
+- NÃO altere a ordem nem os tipos especificados
+- Exercícios do tipo "texto" usam espaco_resposta "linha"|"quadrado"|"lista" e dados_visuais null
+- Exercícios visuais usam espaco_resposta "visual" e preenchem dados_visuais conforme o tipo
 
-Retorne SOMENTE o seguinte JSON, sem nenhum texto antes ou depois:
+Formatos de dados_visuais por tipo:
+- "ligar": {{"esquerda": ["item1","item2","item3"], "direita": ["par1","par2","par3"]}} — 3 a 5 pares temáticos relacionados a {nome_topico}
+- "completar": {{"frases": ["Frase com ___ lacuna.","Outra ___ frase."], "opcoes": ["palavra1","palavra2","palavra3","palavra4"]}} — 2-3 frases, 4 opções incluindo a correta
+- "sequencia": {{"items": ["elem1","elem2","???","elem4"]}} — 4-5 itens, "???" marca a lacuna
+- "tabela": {{"colunas": ["Col1","Col2","Col3"], "linhas": 5}} — 2-3 colunas relevantes ao tópico, 4-5 linhas
+
+Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 
 {{
   "topico": "{nome_topico}",
@@ -373,68 +386,17 @@ Retorne SOMENTE o seguinte JSON, sem nenhum texto antes ou depois:
   "exercicios": [
     {{
       "numero": {inicio},
-      "tipo": "texto",
-      "titulo": "Título curto do exercício",
-      "descricao": "Descrição clara e motivadora",
-      "instrucoes": ["Passo 1", "Passo 2"],
+      "tipo": "{tipos[0]}",
+      "titulo": "Título curto e motivador",
+      "descricao": "Descrição clara do exercício",
+      "instrucoes": ["Instrução 1", "Instrução 2"],
       "espaco_resposta": "linha",
       "dados_visuais": null
-    }},
-    {{
-      "numero": {inicio + 1},
-      "tipo": "ligar",
-      "titulo": "Ligar Palavras",
-      "descricao": "Ligue cada item da coluna esquerda com seu par correto.",
-      "instrucoes": ["Escreva o número correspondente ao lado de cada letra."],
-      "espaco_resposta": "visual",
-      "dados_visuais": {{
-        "esquerda": ["Cachorro", "Rosa", "Avião"],
-        "direita": ["Flor", "Animal", "Veículo"]
-      }}
-    }},
-    {{
-      "numero": {inicio + 2},
-      "tipo": "completar",
-      "titulo": "Complete a Frase",
-      "descricao": "Escolha a palavra correta da lista para completar as frases.",
-      "instrucoes": ["Escreva a palavra no espaço indicado por ___."],
-      "espaco_resposta": "visual",
-      "dados_visuais": {{
-        "frases": ["O ___ nasce de manhã e se põe à tarde.", "À noite brilham as ___."],
-        "opcoes": ["sol", "estrelas", "lua", "nuvens"]
-      }}
-    }},
-    {{
-      "numero": {inicio + 3},
-      "tipo": "sequencia",
-      "titulo": "Complete a Sequência",
-      "descricao": "Qual elemento completa esta sequência?",
-      "instrucoes": ["Escreva sua resposta no espaço com ???."],
-      "espaco_resposta": "visual",
-      "dados_visuais": {{
-        "items": ["Primavera", "Verão", "???", "Inverno"]
-      }}
-    }},
-    {{
-      "numero": {inicio + 4},
-      "tipo": "tabela",
-      "titulo": "Preencha a Tabela",
-      "descricao": "Complete a tabela abaixo com suas respostas.",
-      "instrucoes": ["Preencha cada célula com a informação solicitada."],
-      "espaco_resposta": "visual",
-      "dados_visuais": {{
-        "colunas": ["Dia da Semana", "Atividade Favorita", "Como me Senti"],
-        "linhas": 5
-      }}
     }}
   ]
 }}
 
-Gere todos os {n} exercícios variando criativamente entre os tipos.
-Para "ligar": 3-5 pares relacionados ao tópico {nome_topico}.
-Para "completar": 2-3 frases temáticas com opcoes plausíveis incluindo a correta.
-Para "sequencia": sequências lógicas (dias, meses, números, padrões) com 4-5 items.
-Para "tabela": 2-3 colunas relevantes ao tópico, 4-5 linhas.\
+Gere TODOS os {n} exercícios no array, respeitando OBRIGATORIAMENTE os tipos prescritos.\
 """
 
     client = _client()
