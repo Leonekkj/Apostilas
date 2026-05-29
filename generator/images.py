@@ -45,46 +45,59 @@ def _subtitulo(titulo: str) -> str:
     return "Exercícios para uma mente ativa e feliz"
 
 
-def _build_ai_prompts(titulo: str, num_exercicios: int = 60) -> dict:
-    """Gera prompts orgânicos para Cognivita baseados no título e quantidade de exercícios."""
+def _build_ai_prompts(titulo: str, num_exercicios: int = 60, serie_romano: str = "") -> dict:
+    """Gera prompts para Cognivita com título, série e quantidade de exercícios."""
     sub = _subtitulo(titulo)
-    ex  = f"{num_exercicios} EXERCÍCIOS"
+    ex = f"{num_exercicios} EXERCICIOS"
+    serie_linha = (f"Below the title: smaller elegant text \"Volume {serie_romano}\" in sage green italic. "
+                   if serie_romano else "")
+    subtitulo_linha = f"Below: italic text \"{sub}\" in sage green. "
+    badge_linha = f"Bottom of cover: rounded pill badge in forest green with white bold text \"{ex}\". "
+
+    cover_desc_v1 = (
+        f"brand name COGNIVITA in small bold dark green capital letters at top. "
+        f"Center of cover: large bold title \"{titulo}\" in dark forest green, strong typographic hierarchy. "
+        f"{serie_linha}{subtitulo_linha}{badge_linha}"
+    )
+    cover_desc_v2 = (
+        f"brand name COGNIVITA in small bold dark green at top, large centered title \"{titulo}\" in dark forest green, "
+        f"{'smaller text \"Volume ' + serie_romano + '\" below title in sage green italic, ' if serie_romano else ''}"
+        f"rounded badge reading \"{ex}\" at bottom. Gold spiral binding on left. "
+    )
+    cover_desc_v3 = (
+        f"brand name COGNIVITA in small bold dark green at top, large title \"{titulo}\" centered in dark forest green, "
+        f"{'smaller text \"Volume ' + serie_romano + '\" below in sage green, ' if serie_romano else ''}"
+        f"rounded badge \"{ex}\" at bottom. Gold spiral binding on left. "
+    )
 
     return {
-        # v1 — Produto isolado: livro fechado em destaque, capa totalmente visível
+        # v1 — Produto isolado: livro fechado em destaque
         1: (
             f"Ultra professional e-commerce product photography, photorealistic 4k, organic warm editorial style. "
             f"Hero: one thick closed spiral-bound workbook standing upright centered on a light oak wooden surface, cover fully sharp and in focus. "
-            f"Cover design: warm cream background with subtle watercolor organic shapes in dark forest green (#1B6B4A) at top and bottom edges. "
-            f"Top of cover: small illustrated brain with leaf sprout icon, brand name spelled exactly COGNIVITA (C-O-G-N-I-V-I-T-A, not cognitiva) in bold dark green capital letters. "
-            f"Center of cover: large bold title \"{titulo}\" in dark forest green, strong typographic hierarchy. "
-            f"Below title: italic text \"{sub}\" in sage green. "
-            f"Bottom of cover: rounded pill badge in forest green with white bold text \"{ex}\". "
+            f"Cover design: warm cream background with subtle watercolor organic shapes in dark forest green at top and bottom edges. "
+            f"{cover_desc_v1}"
             f"Warm gold spiral binding on left side, thick pages visible on right side showing book depth. "
             f"Table surface: warm natural linen. Side props: small eucalyptus sprig, reading glasses with thin gold frame, ceramic mug of tea, mini potted succulent. "
             f"Soft diffused natural studio light from upper left, gentle warm shadow on right, airy premium editorial mood, ultra sharp cover detail."
         ),
-        # v2 — Lifestyle: idosa usando o caderno, livro fechado ao lado com capa visível
+        # v2 — Lifestyle: idosa usando o caderno
         2: (
             f"Warm authentic lifestyle photo for Brazilian e-commerce, photorealistic 4k, golden hour natural light. "
             f"Elderly Brazilian woman 70s, short white curly hair, reading glasses, soft beige cardigan, "
             f"sitting at a light wooden table near a large window, smiling warmly, writing with a pen in a large open spiral workbook "
             f"showing cognitive exercise pages with word searches and number grids printed in large clear font for seniors. "
             f"Standing upright beside her on the table: a closed spiral-bound workbook facing the camera, cover fully visible and sharp. "
-            f"Cover design: warm cream background with organic watercolor green shapes at edges, "
-            f"brand name spelled exactly COGNIVITA (C-O-G-N-I-V-I-T-A, not cognitiva) in bold dark green at top, large centered title \"{titulo}\" in dark forest green, "
-            f"italic subtitle \"{sub}\" below, rounded badge reading \"{ex}\" at bottom. Gold spiral binding on left. "
+            f"Cover design: warm cream background with organic watercolor green shapes at edges, {cover_desc_v2}"
             f"Ceramic mug of tea, small green plant in soft-focus background, warm golden window light streaming in. "
             f"Authentic heartwarming expression, shallow depth of field, cinematic warm mood."
         ),
-        # v3 — Flat lay: caderno aberto visto de cima com exercícios visíveis e props
+        # v3 — Flat lay: caderno aberto visto de cima
         3: (
             f"Professional overhead flat lay photography for Brazilian e-commerce, photorealistic 4k, warm organic aesthetic. "
             f"Center: large open spiral-bound workbook showing two pages of cognitive exercises — word searches, number sequences and memory grids printed in large clear font for seniors, pages bright white and sharp. "
             f"Propped upright against the open workbook: one closed spiral-bound workbook with cover fully visible. "
-            f"Cover design: warm cream background with organic watercolor green shapes, "
-            f"brand name spelled exactly COGNIVITA (C-O-G-N-I-V-I-T-A, not cognitiva) in bold dark green at top, large title \"{titulo}\" centered in dark forest green, "
-            f"italic subtitle \"{sub}\" below, rounded badge \"{ex}\" at bottom. Gold spiral binding on left. "
+            f"Cover design: warm cream background with organic watercolor green shapes, {cover_desc_v3}"
             f"Props arranged organically around the books on warm linen surface: two yellow pencils, gold paper clips, "
             f"a ceramic coffee mug, pressed dried eucalyptus leaves, reading glasses with thin gold frame, small succulent plant. "
             f"Soft diffused natural light from above, no harsh shadows, clean airy composition, ultra sharp detail on both books."
@@ -1378,11 +1391,12 @@ def gerar_capa_produto(
     Retorna [v1_path, v2_path, v3_path] — o primeiro é o imagem_path do anúncio.
     """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    titulo_capa = f"{nome_produto} {_to_roman(serie)}"
+    serie_romano = _to_roman(serie)
+    titulo_capa = f"{nome_produto} {serie_romano}"
     badge   = f"✦ {num_exercicios} EXERCÍCIOS ✦"
     rodape1 = titulo_capa.upper()
     rodape2 = f"{num_exercicios} Exercícios · Apostila Física · Para Idosos 60+"
-    prompts = _build_ai_prompts(titulo_capa, num_exercicios)
+    prompts = _build_ai_prompts(nome_produto, num_exercicios, serie_romano=serie_romano)
 
     paths = []
 
