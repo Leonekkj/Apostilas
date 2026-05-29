@@ -809,7 +809,8 @@ def _exercise_sequencia_html(dados: dict) -> str:
 
 def _exercise_tabela_html(dados: dict) -> str:
     colunas = dados.get("colunas", [])
-    num_linhas = dados.get("linhas", 5)
+    raw_linhas = dados.get("linhas", 5)
+    num_linhas = int(raw_linhas[0] if isinstance(raw_linhas, list) else raw_linhas)
     headers = "".join(f'<th>{_html_escape.escape(str(c))}</th>' for c in colunas)
     row = "".join("<td></td>" for _ in colunas)
     rows = "".join(f"<tr>{row}</tr>" for _ in range(num_linhas))
