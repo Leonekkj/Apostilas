@@ -445,32 +445,74 @@ Retorne SOMENTE este JSON com exatamente {n} exercício(s) no array:
 
 
 def _gerar_batch(topico: dict, n: int, offset: int = 0, fase: dict = None) -> list:
-    """Gera n exercícios com distribuição garantida de tipos (um tipo por chamada Groq)."""
-    from collections import Counter, defaultdict
+    """Gera n exercícios em UMA chamada Groq com distribuição de tipos garantida."""
+    nome_topico = topico.get("nome", topico.get("name", str(topico)))
+    inicio = offset + 1
 
     tipos_seq = _distribuir_tipos(n)
-    contagem = Counter(tipos_seq)
+    lista_tipos = "\n".join(
+        f'  {inicio + i}. tipo="{t}"' for i, t in enumerate(tipos_seq)
+    )
 
-    # Gera cada tipo em chamada separada
-    por_tipo: dict[str, list] = {}
-    for tipo, count in contagem.items():
-        batch = _gerar_tipo_unico(topico, tipo, count, fase=fase)
-        por_tipo[tipo] = batch
+    contexto_fase = ""
+    if fase:
+        contexto_fase = f"\nFase: {fase.get('nome', '')} — {fase.get('objetivo', '')}\n"
 
-    # Monta na ordem correta e atribui números
-    idx: dict[str, int] = defaultdict(int)
-    resultado = []
-    for i, tipo in enumerate(tipos_seq):
-        numero = offset + i + 1
-        lista = por_tipo.get(tipo, [])
-        j = idx[tipo]
-        if j < len(lista):
-            ex = dict(lista[j])
-            ex["numero"] = numero
-            ex["tipo"] = tipo  # garante o tipo correto
-            resultado.append(ex)
-            idx[tipo] += 1
-    return resultado
+    prompt = f"""\
+Gere exatamente {n} exercícios cognitivos para idosos 60+ sobre "{nome_topico}".{contexto_fase}
+Numere de {inicio} a {inicio + n - 1}. Exercícios devem ser realizáveis em papel impresso.
+
+TIPOS OBRIGATÓRIOS por exercício (siga esta ordem exata):
+{lista_tipos}
+
+FORMATOS por tipo:
+
+"texto": {{"numero":N,"tipo":"texto","titulo":"...","descricao":"...","instrucoes":["..."],"espaco_resposta":"linha","dados_visuais":null}}
+
+"ligar": {{"numero":N,"tipo":"ligar","titulo":"...","descricao":"Ligue cada item ao seu par.","instrucoes":["Escreva o número ao lado de cada letra."],"espaco_resposta":"visual","dados_visuais":{{"esquerda":["item1","item2","item3"],"direita":["par1","par2","par3"]}}}}
+(3-5 pares temáticos de {nome_topico})
+
+"completar": {{"numero":N,"tipo":"completar","titulo":"...","descricao":"Complete as frases.","instrucoes":["Escreva a palavra no espaço ___."],"espaco_resposta":"visual","dados_visuais":{{"frases":["Frase com ___ lacuna.","Outra ___ frase."],"opcoes":["certa","errada1","errada2","errada3"]}}}}
+(2-3 frases, 4 opções)
+
+"sequencia": {{"numero":N,"tipo":"sequencia","titulo":"...","descricao":"Complete a sequência.","instrucoes":["Escreva o que falta em ???."],"espaco_resposta":"visual","dados_visuais":{{"items":["a","b","???","d"]}}}}
+(4-5 itens, ??? é a lacuna)
+
+"tabela": {{"numero":N,"tipo":"tabela","titulo":"...","descricao":"Preencha a tabela.","instrucoes":["Preencha cada célula."],"espaco_resposta":"visual","dados_visuais":{{"colunas":["Col1","Col2","Col3"],"linhas":5}}}}
+(2-3 colunas, 4-5 linhas)
+
+Retorne SOMENTE: {{"exercicios": [todos os {n} exercícios]}}\
+"""
+
+    msgs = [
+        {"role": "system", "content": _SYSTEM_CONTEUDO},
+        {"role": "user", "content": prompt},
+    ]
+    for model in (_MODEL, _MODEL_FALLBACK):
+        try:
+            response = _client().chat.completions.create(
+                model=model,
+                max_tokens=8000,
+                response_format={"type": "json_object"},
+                messages=msgs,
+            )
+            raw = response.choices[0].message.content
+            parsed = _parse_json(raw)
+            exercicios = parsed.get("exercicios", [])
+            for i, ex in enumerate(exercicios):
+                if i < len(tipos_seq):
+                    ex["tipo"] = tipos_seq[i]
+                    ex["numero"] = inicio + i
+            return exercicios
+        except Exception as exc:
+            if "rate_limit" in str(exc).lower() or "429" in str(exc):
+                logging.warning("[COGNIVITA] Quota esgotada para %s — tentando %s", model, _MODEL_FALLBACK)
+                if model == _MODEL_FALLBACK:
+                    raise RuntimeError(
+                        "Quota diária do Groq esgotada. Tente novamente amanhã."
+                    ) from exc
+                continue
+            raise
 
 
 def gerar_conteudo(topico: dict, num_exercicios: int) -> str:
@@ -838,19 +880,29 @@ def gerar_titulo_apostila_produto(nome_produto: str, num_exercicios: int) -> str
 Crie 1 título otimizado para Mercado Livre de apostila física impressa.
 Linha: {nome_produto} | Exercícios: {num_exercicios} | Público: idosos 60+
 
-Formato obrigatório (máx 60 chars): "{nome_produto} — {num_exercicios} Exercícios | [complemento]"
-Complemento deve mencionar idosos. Varie: Apostila Física, Estimulação Cognitiva, etc.
-Retorne SOMENTE o título, sem aspas, sem explicação."""
+Formato obrigatório (máx 60 chars): "{nome_produto} {num_exercicios} Exercícios [complemento]"
+Complemento deve mencionar idosos. Exemplos: "Para Idosos", "Apostila Física", "Estimulação Cognitiva".
+Retorne SOMENTE o título final, sem aspas, sem chaves, sem JSON, sem explicação."""
     client = _client()
     response = client.chat.completions.create(
         model=_MODEL,
         max_tokens=80,
         messages=[
-            {"role": "system", "content": _SYSTEM_TITULOS},
+            {"role": "system", "content": "Você é especialista em títulos para Mercado Livre. Responda APENAS com o título solicitado, sem JSON, sem aspas, sem explicação."},
             {"role": "user", "content": prompt},
         ],
     )
-    titulo = response.choices[0].message.content.strip().strip('"').rstrip(".")
+    titulo = response.choices[0].message.content.strip().strip('"').strip("'").rstrip(".")
+    # Remove JSON artifacts if model still wraps the title
+    if titulo.startswith("{") or titulo.startswith("["):
+        try:
+            parsed = _parse_json(titulo)
+            if isinstance(parsed, dict):
+                titulo = next(iter(parsed.values()), titulo)
+            elif isinstance(parsed, list) and parsed:
+                titulo = parsed[0].get("titulo", titulo) if isinstance(parsed[0], dict) else str(parsed[0])
+        except Exception:
+            titulo = titulo.lstrip("{[").split(":")[-1].strip().strip('"}]').strip()
     return titulo[:60] if len(titulo) > 60 else titulo
 
 

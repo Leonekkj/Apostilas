@@ -211,7 +211,7 @@ async def listar_produtos(_auth=Depends(_require_auth)):
 
 @app.post("/api/produto")
 async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_auth)):
-    from generator import content, images, pdf
+    from generator import content, images
 
     topico = await asyncio.to_thread(database.buscar_topico_por_id, body.topico_id)
     if topico is None:
@@ -224,7 +224,6 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
     try:
         produto_id = await asyncio.to_thread(database.criar_produto, body.nome, body.topico_id, body.serie)
         conteudo_200_json = await asyncio.to_thread(content.gerar_conteudo, topico, 200)
-        descricao = await asyncio.to_thread(content.gerar_descricao_ml, topico, 200)
 
         apostilas_result = []
         for posicao, num_ex in enumerate(_FATIAS, start=1):
@@ -233,16 +232,15 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
                 database.salvar_apostila, body.topico_id, num_ex, conteudo_fatia, produto_id
             )
             created_apostila_ids.append(apostila_id)
-            pdf_path = await asyncio.to_thread(pdf.gerar_pdf, apostila_id, topico, conteudo_fatia)
-            generated_files.append(pdf_path)
-            await asyncio.to_thread(database.atualizar_pdf_apostila, apostila_id, pdf_path)
 
-            image_path = await asyncio.to_thread(
+            image_paths = await asyncio.to_thread(
                 images.gerar_capa_produto, apostila_id, body.nome, topico, num_ex, posicao
             )
-            generated_files.append(image_path)
+            image_path = image_paths[0] if isinstance(image_paths, list) else image_paths
+            generated_files.extend(image_paths if isinstance(image_paths, list) else [image_path])
 
             titulo = await asyncio.to_thread(content.gerar_titulo_apostila_produto, body.nome, num_ex)
+            descricao = await asyncio.to_thread(content.gerar_descricao_ml, topico, num_ex)
             tabela = body.precos or _PRECOS_PRODUTO
             preco = float(tabela.get(str(num_ex), tabela.get(num_ex, _PRECOS_PRODUTO.get(num_ex, 29.90))))
             anuncio_id = await asyncio.to_thread(

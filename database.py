@@ -761,6 +761,24 @@ def resumo_vendas_por_apostila() -> list[dict]:
         conn.close()
 
 
+def buscar_apostilas_vendidas_sem_pdf() -> list[dict]:
+    """Retorna apostilas que tiveram vendas mas ainda não têm PDF gerado."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute("""
+            SELECT DISTINCT ap.id, ap.topico_id, ap.num_exercicios, ap.conteudo_json,
+                            tp.nome AS topico_nome
+            FROM vendas v
+            JOIN anuncios  an ON v.anuncio_id  = an.id
+            JOIN apostilas ap ON an.apostila_id = ap.id
+            JOIN topicos   tp ON ap.topico_id   = tp.id
+            WHERE (ap.pdf_path IS NULL OR ap.pdf_path = '')
+        """)
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def listar_todas_apostilas() -> list[dict]:
     """Retorna todas as apostilas com nome do tópico (para o dropdown de link)."""
     conn = _get_conn()
