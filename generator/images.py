@@ -662,11 +662,11 @@ def _fetch_qwen_image(prompt: str) -> "Image.Image | None":
     }
     try:
         resp = _req.post(
-            "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis",
+            "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/image-generation/generation",
             headers=headers,
             json={
-                "model": "qwen-image2.0",
-                "input": {"prompt": prompt},
+                "model": "wan2.7-image",
+                "input": {"messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}]},
                 "parameters": {"size": "1024*1024", "n": 1},
             },
             timeout=30,
@@ -678,9 +678,9 @@ def _fetch_qwen_image(prompt: str) -> "Image.Image | None":
             return None
 
         for _ in range(30):
-            time.sleep(3)
+            time.sleep(5)
             r = _req.get(
-                f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}",
+                f"https://dashscope-intl.aliyuncs.com/api/v1/tasks/{task_id}",
                 headers={"Authorization": f"Bearer {api_key}"},
                 timeout=15,
             )
@@ -688,8 +688,14 @@ def _fetch_qwen_image(prompt: str) -> "Image.Image | None":
             output = r.json().get("output", {})
             status = output.get("task_status")
             if status == "SUCCEEDED":
-                url = output["results"][0]["url"]
-                img_data = _req.get(url, timeout=30).content
+                choices = output.get("choices", [])
+                if not choices:
+                    return None
+                content = choices[0].get("message", {}).get("content", [])
+                img_url = next((c["image"] for c in content if c.get("type") == "image"), None)
+                if not img_url:
+                    return None
+                img_data = _req.get(img_url, timeout=30).content
                 return Image.open(io.BytesIO(img_data)).convert("RGB")
             elif status in ("FAILED", "CANCELED"):
                 logger.warning("Qwen image task falhou: %s", output.get("message"))

@@ -42,7 +42,7 @@ def _qwen_client():
         return None
     from openai import OpenAI as _OpenAI
     return _OpenAI(
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         api_key=api_key,
     )
 
