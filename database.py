@@ -316,6 +316,8 @@ def listar_anuncios(
         if status is not None:
             sql += " AND an.status = ?"
             params.append(status)
+        else:
+            sql += " AND an.status != 'deletado'"
         if tipo is not None:
             sql += " AND an.tipo = ?"
             params.append(tipo)

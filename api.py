@@ -191,7 +191,7 @@ async def listar_topicos(_auth=Depends(_require_auth)):
 @app.get("/api/stats")
 async def stats(_auth=Depends(_require_auth)):
     contagem = await asyncio.to_thread(database.contar_anuncios)
-    produtos = await asyncio.to_thread(database.listar_produtos)
+    produtos = await asyncio.to_thread(database.listar_produtos_com_apostilas)
     kits = await asyncio.to_thread(database.listar_kits)
     return {
         "anuncios": contagem,
