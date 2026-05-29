@@ -327,7 +327,7 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
 
         anuncios_result = []
 
-        for i, title in enumerate(titulos):
+        for i, title in enumerate(titulos, start=1):
             # Generate kit cover images
             image_paths = await asyncio.to_thread(
                 images.gerar_capas_kit, kit_id, nome, apostilas, i

@@ -1547,33 +1547,24 @@ function renderKits(list) {
   }).join('');
 }
 
-function populateKitApostilas() {
+async function populateKitApostilas() {
   const list = document.getElementById('kit-apostilas-list');
-  if (!_produtos.length) {
-    list.innerHTML = '<span style="color:var(--muted);font-size:13px;padding:4px;">Nenhum produto disponível. Crie um produto primeiro.</span>';
-    return;
-  }
-  // Support both flat apostilas (legacy) and nested linha structure
-  const hasNested = _produtos.some(p => Array.isArray(p.apostilas) && p.apostilas.length);
-  if (hasNested) {
-    const apostilas = _produtos.flatMap(p =>
-      (p.apostilas || []).map(a => ({ ...a, produto_nome: p.nome || p.topico_nome || 'Produto' }))
-    );
+  list.innerHTML = '<span style="color:var(--muted);font-size:13px;padding:4px;">Carregando…</span>';
+  try {
+    const res = await apiFetch('/api/admin/apostilas');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const apostilas = await res.json();
     if (!apostilas.length) {
-      list.innerHTML = '<span style="color:var(--muted);font-size:13px;padding:4px;">Nenhuma apostila disponível.</span>';
+      list.innerHTML = '<span style="color:var(--muted);font-size:13px;padding:4px;">Nenhuma apostila disponível. Crie um produto primeiro.</span>';
       return;
     }
     list.innerHTML = apostilas.map(a => `
       <label class="checkbox-item">
         <input type="checkbox" value="${a.id}" />
-        <span>${esc(a.produto_nome)} — ${a.num_exercicios || 60} ex</span>
+        <span>${esc(a.topico_nome || 'Apostila')} — ${a.num_exercicios || 60} ex</span>
       </label>`).join('');
-  } else {
-    list.innerHTML = _produtos.map(p => `
-      <label class="checkbox-item">
-        <input type="checkbox" value="${p.id}" />
-        <span>${esc(p.topico_nome || 'Apostila')} — ${p.num_exercicios || 60} ex</span>
-      </label>`).join('');
+  } catch (e) {
+    list.innerHTML = `<span style="color:var(--error,#c0392b);font-size:13px;padding:4px;">Erro ao carregar apostilas: ${e.message}</span>`;
   }
 }
 
