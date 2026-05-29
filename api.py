@@ -234,7 +234,7 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             created_apostila_ids.append(apostila_id)
 
             image_paths = await asyncio.to_thread(
-                images.gerar_capa_produto, apostila_id, body.nome, topico, num_ex, posicao
+                images.gerar_capa_produto, apostila_id, body.nome, topico, num_ex, posicao, body.serie
             )
             image_path = image_paths[0] if isinstance(image_paths, list) else image_paths
             generated_files.extend(image_paths if isinstance(image_paths, list) else [image_path])

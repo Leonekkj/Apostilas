@@ -26,6 +26,17 @@ _SUBTITULOS = {
     "sequência lógica":         "Raciocínio afiado, decisões mais seguras",
 }
 
+def _to_roman(n: int) -> str:
+    vals = [(1000,"M"),(900,"CM"),(500,"D"),(400,"CD"),(100,"C"),(90,"XC"),
+            (50,"L"),(40,"XL"),(10,"X"),(9,"IX"),(5,"V"),(4,"IV"),(1,"I")]
+    result = ""
+    for v, s in vals:
+        while n >= v:
+            result += s
+            n -= v
+    return result
+
+
 def _subtitulo(titulo: str) -> str:
     chave = titulo.lower().strip()
     for k, v in _SUBTITULOS.items():
@@ -1299,6 +1310,7 @@ def gerar_capa_produto(
     topico: dict,
     num_exercicios: int,
     posicao: int,
+    serie: int = 1,
 ) -> list[str]:
     """Gera 3 capas para uma apostila de linha de produto.
 
@@ -1306,10 +1318,11 @@ def gerar_capa_produto(
     Retorna [v1_path, v2_path, v3_path] — o primeiro é o imagem_path do anúncio.
     """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    titulo_capa = f"{nome_produto} {_to_roman(serie)}"
     badge   = f"✦ {num_exercicios} EXERCÍCIOS ✦"
-    rodape1 = nome_produto.upper()
+    rodape1 = titulo_capa.upper()
     rodape2 = f"{num_exercicios} Exercícios · Apostila Física · Para Idosos 60+"
-    prompts = _build_ai_prompts(nome_produto, num_exercicios)
+    prompts = _build_ai_prompts(titulo_capa, num_exercicios)
 
     paths = []
 
@@ -1318,7 +1331,7 @@ def gerar_capa_produto(
     ai_images_v1 = _fetch_ai_images_for_variacoes([1], prompts)
     ai_entry = ai_images_v1.get(1)
     ai_img, ai_src = ai_entry if ai_entry else (None, None)
-    _gerar_capa(fname_v1, 1, nome_produto, badge, rodape1, rodape2,
+    _gerar_capa(fname_v1, 1, titulo_capa, badge, rodape1, rodape2,
                 ai_image=ai_img, ai_source=ai_src)
     paths.append(str(fname_v1))
 
@@ -1334,7 +1347,7 @@ def gerar_capa_produto(
             ai_images_v = _fetch_ai_images_for_variacoes([v], prompts)
             ai_entry_v = ai_images_v.get(v)
             ai_img_v, ai_src_v = ai_entry_v if ai_entry_v else (None, None)
-            _gerar_capa(fname, v, nome_produto, badge, rodape1, rodape2,
+            _gerar_capa(fname, v, titulo_capa, badge, rodape1, rodape2,
                         ai_image=ai_img_v, ai_source=ai_src_v)
         paths.append(str(fname))
 
