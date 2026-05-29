@@ -650,8 +650,62 @@ def _fetch_hf_image(prompt: str) -> "Image.Image | None":
     return None
 
 
+def _fetch_qwen_image(prompt: str) -> "Image.Image | None":
+    import io, time, requests as _req
+    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if not api_key:
+        return None
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "X-DashScope-Async": "enable",
+    }
+    try:
+        resp = _req.post(
+            "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis",
+            headers=headers,
+            json={
+                "model": "qwen-image2.0",
+                "input": {"prompt": prompt},
+                "parameters": {"size": "1024*1024", "n": 1},
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        task_id = resp.json().get("output", {}).get("task_id")
+        if not task_id:
+            logger.warning("Qwen image: task_id não retornado")
+            return None
+
+        for _ in range(30):
+            time.sleep(3)
+            r = _req.get(
+                f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=15,
+            )
+            r.raise_for_status()
+            output = r.json().get("output", {})
+            status = output.get("task_status")
+            if status == "SUCCEEDED":
+                url = output["results"][0]["url"]
+                img_data = _req.get(url, timeout=30).content
+                return Image.open(io.BytesIO(img_data)).convert("RGB")
+            elif status in ("FAILED", "CANCELED"):
+                logger.warning("Qwen image task falhou: %s", output.get("message"))
+                return None
+
+        logger.warning("Qwen image: timeout aguardando geração")
+    except Exception as e:
+        logger.warning("Falha ao gerar imagem Qwen: %s", e)
+    return None
+
+
 def _fetch_ai_image(prompt: str) -> "tuple[Image.Image | None, str | None]":
-    """Retorna (imagem, fonte) — fonte é 'ideogram', 'replicate', 'fal', 'leonardo', 'gemini', 'hf', ou None."""
+    """Retorna (imagem, fonte) — fonte é 'qwen', 'ideogram', 'replicate', 'fal', 'leonardo', 'gemini', 'hf', ou None."""
+    img = _fetch_qwen_image(prompt)
+    if img is not None:
+        return img, "qwen"
     img = _fetch_ideogram_image(prompt)
     if img is not None:
         return img, "ideogram"
