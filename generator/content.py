@@ -35,13 +35,64 @@ def _claude_client() -> Anthropic | None:
     return Anthropic(api_key=api_key)
 
 
+def _qwen_client():
+    """Cliente OpenAI-compatible para Alibaba Cloud DashScope (Qwen)."""
+    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if not api_key:
+        return None
+    from openai import OpenAI as _OpenAI
+    return _OpenAI(
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key=api_key,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Constantes de modelo / tokens
 # ---------------------------------------------------------------------------
 
-_MODEL         = "llama-3.3-70b-versatile"   # Groq — modelo principal
-_MODEL_FALLBACK = "llama-3.1-8b-instant"       # Fallback quando quota do principal esgota
-_CLAUDE_MODEL = "claude-sonnet-4-6"
+_MODEL          = "llama-3.3-70b-versatile"  # Groq — modelo principal
+_MODEL_FALLBACK = "llama-3.1-8b-instant"      # Groq — fallback quando quota do principal esgota
+_QWEN_MODEL     = "qwen-turbo"                # Alibaba Cloud — fallback quando Groq esgota
+_CLAUDE_MODEL   = "claude-sonnet-4-6"
+
+
+def _chat_completions(msgs: list, max_tokens: int, json_mode: bool = True) -> str:
+    """Tenta Groq (principal → fallback) e depois Qwen. Retorna o texto da resposta."""
+    fmt = {"type": "json_object"} if json_mode else None
+    groq = _client()
+
+    for model in (_MODEL, _MODEL_FALLBACK):
+        try:
+            kw = dict(model=model, max_tokens=max_tokens, messages=msgs)
+            if fmt:
+                kw["response_format"] = fmt
+            resp = groq.chat.completions.create(**kw)
+            return resp.choices[0].message.content
+        except Exception as exc:
+            is_quota = "rate_limit" in str(exc).lower() or "429" in str(exc)
+            if is_quota:
+                logging.warning("[COGNIVITA] Quota esgotada para %s", model)
+                continue
+            raise
+
+    # Groq esgotado — tenta Qwen
+    qwen = _qwen_client()
+    if qwen is not None:
+        try:
+            logging.info("[COGNIVITA] Usando Qwen (%s) como fallback", _QWEN_MODEL)
+            kw = dict(model=_QWEN_MODEL, max_tokens=max_tokens, messages=msgs)
+            if fmt:
+                kw["response_format"] = fmt
+            resp = qwen.chat.completions.create(**kw)
+            return resp.choices[0].message.content
+        except Exception as exc:
+            logging.warning("[COGNIVITA] Qwen falhou: %s", exc)
+
+    raise RuntimeError(
+        "Quota diária do Groq esgotada e Qwen indisponível. "
+        "Configure DASHSCOPE_API_KEY ou aguarde o reset do Groq (meia-noite UTC)."
+    )
 
 _SYSTEM_EDITORIAL = """\
 Você é especialista em design editorial premium de materiais terapêuticos para idosos 60+.
@@ -416,32 +467,13 @@ Retorne SOMENTE este JSON com exatamente {n} exercício(s) no array:
 {{"exercicios": [...]}}\
 """
 
-    client = _client()
     msgs = [
         {"role": "system", "content": _SYSTEM_CONTEUDO},
         {"role": "user", "content": prompt},
     ]
-    for model in (_MODEL, _MODEL_FALLBACK):
-        try:
-            response = client.chat.completions.create(
-                model=model,
-                max_tokens=4000,
-                response_format={"type": "json_object"},
-                messages=msgs,
-            )
-            raw = response.choices[0].message.content
-            parsed = _parse_json(raw)
-            return parsed.get("exercicios", [])
-        except Exception as exc:
-            if "rate_limit" in str(exc).lower() or "429" in str(exc):
-                logging.warning("[COGNIVITA] Quota esgotada para %s — tentando fallback %s", model, _MODEL_FALLBACK)
-                if model == _MODEL_FALLBACK:
-                    raise RuntimeError(
-                        "Quota diária do Groq esgotada em ambos os modelos. "
-                        "Aguarde até meia-noite (horário UTC) ou amanhã para resetar."
-                    ) from exc
-                continue
-            raise
+    raw = _chat_completions(msgs, max_tokens=4000)
+    parsed = _parse_json(raw)
+    return parsed.get("exercicios", [])
 
 
 def _gerar_batch(topico: dict, n: int, offset: int = 0, fase: dict = None) -> list:
@@ -488,31 +520,14 @@ Retorne SOMENTE: {{"exercicios": [todos os {n} exercícios]}}\
         {"role": "system", "content": _SYSTEM_CONTEUDO},
         {"role": "user", "content": prompt},
     ]
-    for model in (_MODEL, _MODEL_FALLBACK):
-        try:
-            response = _client().chat.completions.create(
-                model=model,
-                max_tokens=8000,
-                response_format={"type": "json_object"},
-                messages=msgs,
-            )
-            raw = response.choices[0].message.content
-            parsed = _parse_json(raw)
-            exercicios = parsed.get("exercicios", [])
-            for i, ex in enumerate(exercicios):
-                if i < len(tipos_seq):
-                    ex["tipo"] = tipos_seq[i]
-                    ex["numero"] = inicio + i
-            return exercicios
-        except Exception as exc:
-            if "rate_limit" in str(exc).lower() or "429" in str(exc):
-                logging.warning("[COGNIVITA] Quota esgotada para %s — tentando %s", model, _MODEL_FALLBACK)
-                if model == _MODEL_FALLBACK:
-                    raise RuntimeError(
-                        "Quota diária do Groq esgotada. Tente novamente amanhã."
-                    ) from exc
-                continue
-            raise
+    raw = _chat_completions(msgs, max_tokens=8000)
+    parsed = _parse_json(raw)
+    exercicios = parsed.get("exercicios", [])
+    for i, ex in enumerate(exercicios):
+        if i < len(tipos_seq):
+            ex["tipo"] = tipos_seq[i]
+            ex["numero"] = inicio + i
+    return exercicios
 
 
 def gerar_conteudo(topico: dict, num_exercicios: int) -> str:
@@ -633,17 +648,10 @@ Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 ]\
 """
 
-    client = _client()
-    response = client.chat.completions.create(
-        model=_MODEL,
-        max_tokens=1024,
-        messages=[
-            {"role": "system", "content": _SYSTEM_TITULOS},
-            {"role": "user", "content": prompt},
-        ],
-    )
-
-    raw = response.choices[0].message.content
+    raw = _chat_completions([
+        {"role": "system", "content": _SYSTEM_TITULOS},
+        {"role": "user", "content": prompt},
+    ], max_tokens=1024)
     result = _parse_json(raw)
 
     if not isinstance(result, list) or len(result) != 6:
@@ -708,16 +716,10 @@ ESPECIFICAÇÕES
 Retorne APENAS o texto acima preenchido, sem JSON, sem markdown, sem comentários.\
 """
 
-    client = _client()
-    response = client.chat.completions.create(
-        model=_MODEL,
-        max_tokens=600,
-        messages=[
-            {"role": "system", "content": _SYSTEM_TITULOS},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    return response.choices[0].message.content.strip()
+    return _chat_completions([
+        {"role": "system", "content": _SYSTEM_TITULOS},
+        {"role": "user", "content": prompt},
+    ], max_tokens=600, json_mode=False).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -791,17 +793,10 @@ Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 ]\
 """
 
-    client = _client()
-    response = client.chat.completions.create(
-        model=_MODEL,
-        max_tokens=1024,
-        messages=[
-            {"role": "system", "content": _SYSTEM_TITULOS},
-            {"role": "user", "content": prompt},
-        ],
-    )
-
-    raw = response.choices[0].message.content
+    raw = _chat_completions([
+        {"role": "system", "content": _SYSTEM_TITULOS},
+        {"role": "user", "content": prompt},
+    ], max_tokens=1024)
     result = _parse_json(raw)
 
     if not isinstance(result, list) or len(result) != 6:
@@ -843,18 +838,11 @@ Requisitos:
 Retorne SOMENTE o nome, sem aspas, sem ponto final, sem explicação.\
 """
 
-    client = _client()
-    response = client.chat.completions.create(
-        model=_MODEL,
-        max_tokens=64,
-        messages=[
-            {"role": "system", "content": "Você é especialista em naming de produtos para o público 60+. "
-                                           "Responda apenas com o nome solicitado, sem explicações adicionais."},
-            {"role": "user", "content": prompt},
-        ],
-    )
-
-    nome = response.choices[0].message.content.strip().strip('"').strip("'").rstrip(".")
+    nome = _chat_completions([
+        {"role": "system", "content": "Você é especialista em naming de produtos para o público 60+. "
+                                       "Responda apenas com o nome solicitado, sem explicações adicionais."},
+        {"role": "user", "content": prompt},
+    ], max_tokens=64, json_mode=False).strip().strip('"').strip("'").rstrip(".")
     return nome
 
 
@@ -883,16 +871,10 @@ Linha: {nome_produto} | Exercícios: {num_exercicios} | Público: idosos 60+
 Formato obrigatório (máx 60 chars): "{nome_produto} {num_exercicios} Exercícios [complemento]"
 Complemento deve mencionar idosos. Exemplos: "Para Idosos", "Apostila Física", "Estimulação Cognitiva".
 Retorne SOMENTE o título final, sem aspas, sem chaves, sem JSON, sem explicação."""
-    client = _client()
-    response = client.chat.completions.create(
-        model=_MODEL,
-        max_tokens=80,
-        messages=[
-            {"role": "system", "content": "Você é especialista em títulos para Mercado Livre. Responda APENAS com o título solicitado, sem JSON, sem aspas, sem explicação."},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    titulo = response.choices[0].message.content.strip().strip('"').strip("'").rstrip(".")
+    titulo = _chat_completions([
+        {"role": "system", "content": "Você é especialista em títulos para Mercado Livre. Responda APENAS com o título solicitado, sem JSON, sem aspas, sem explicação."},
+        {"role": "user", "content": prompt},
+    ], max_tokens=80, json_mode=False).strip().strip('"').strip("'").rstrip(".")
     # Remove JSON artifacts if model still wraps the title
     if titulo.startswith("{") or titulo.startswith("["):
         try:
