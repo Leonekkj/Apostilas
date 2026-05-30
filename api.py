@@ -860,11 +860,30 @@ async def ml_webhook(request: Request):
                 continue
 
             apostila = database.buscar_apostila_por_id(apostila_id)
-            if not apostila or not apostila.get("pdf_path"):
+            if not apostila:
                 continue
 
+            # Gera o PDF se ainda não existir
+            pdf_path = apostila.get("pdf_path")
+            if not pdf_path or not os.path.exists(pdf_path):
+                import logging
+                logging.info(f"[webhook] Gerando PDF para apostila {apostila_id} sob demanda...")
+                try:
+                    from generator import content as _content, pdf as _gen_pdf
+                    topico = {
+                        "id": apostila["topico_id"],
+                        "nome": apostila.get("topico_nome", ""),
+                        "descricao": "",
+                    }
+                    conteudo_json = _content.gerar_conteudo(topico, apostila["num_exercicios"])
+                    pdf_path = _gen_pdf.gerar_pdf(apostila_id, topico, conteudo_json)
+                    database.salvar_conteudo_apostila(apostila_id, conteudo_json, pdf_path)
+                except Exception as exc:
+                    logging.warning(f"[webhook] Falha ao gerar PDF apostila {apostila_id}: {exc}")
+                    continue
+
             app_url = os.getenv("APP_URL", "http://localhost:8000")
-            pdf_url = _pdf_path_to_url(apostila["pdf_path"])
+            pdf_url = _pdf_path_to_url(pdf_path)
             if not pdf_url:
                 continue
             if pdf_url.startswith("/"):
@@ -878,8 +897,10 @@ async def ml_webhook(request: Request):
 
         return {"status": "ok", "entregues": entregues}
 
-    result = await asyncio.to_thread(_processar)
-    return result
+    # Responde 200 imediatamente para o ML não reenviar por timeout,
+    # e processa a entrega em background
+    asyncio.create_task(asyncio.to_thread(_processar))
+    return {"status": "received"}
 
 
 @app.post("/api/admin/ml/registrar-webhook")
