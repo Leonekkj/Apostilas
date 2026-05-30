@@ -1446,6 +1446,69 @@ def gerar_capas(
     return paths
 
 
+def _build_kit_ai_prompts(apostilas_info: list[dict], num_exercicios: int) -> dict:
+    """Gera prompts para capa de kit com N livros, cada um com seu título específico.
+
+    apostilas_info: lista de dicts com chave 'nome' (topico_nome de cada apostila).
+    Retorna {1: prompt_v1, 2: prompt_v2, 3: prompt_v3}.
+    """
+    import random
+    n = len(apostilas_info)
+    ex = f"{num_exercicios} EXERCICIOS"
+    ambiente_v1 = random.choice(_AMBIENTES_V1)
+    ambiente_v2 = random.choice(_AMBIENTES_V2)
+    ambiente_v3 = random.choice(_AMBIENTES_V3)
+
+    posicoes = ["First", "Second", "Third", "Fourth"]
+
+    def _book_desc(i: int, nome: str) -> str:
+        titulo = nome.upper()
+        return (
+            f"{posicoes[i]} book cover: warm cream background with dark forest green watercolor shapes, "
+            f"brand COGNIVITA in small bold dark green at top, "
+            f"large bold title \"{titulo}\" centered in dark forest green, "
+            f"badge \"{ex}\" at bottom, gold spiral binding on left."
+        )
+
+    books_desc = " ".join(_book_desc(i, a["nome"]) for i, a in enumerate(apostilas_info))
+
+    if n == 2:
+        arrangement_v1 = "two thick spiral-bound workbooks standing upright side by side, covers facing the camera, slight angle between them"
+        arrangement_v2 = "two closed spiral-bound workbooks standing beside her, both covers visible and sharp"
+        arrangement_v3 = "two spiral-bound workbooks propped upright side by side, both covers fully visible"
+    elif n == 3:
+        arrangement_v1 = "three spiral-bound workbooks in a slight fan formation, center book slightly forward, all covers visible"
+        arrangement_v2 = "three closed spiral-bound workbooks arranged in a fan beside her, all covers facing the camera"
+        arrangement_v3 = "three spiral-bound workbooks in a slight fan arrangement, all covers fully visible"
+    else:  # 4
+        arrangement_v1 = "four spiral-bound workbooks arranged with two in front and two slightly elevated behind, all covers visible"
+        arrangement_v2 = "four closed spiral-bound workbooks arranged in a 2x2 formation beside her, all covers visible"
+        arrangement_v3 = "four spiral-bound workbooks in a 2x2 grid arrangement, all covers fully visible"
+
+    return {
+        1: (
+            f"Ultra professional e-commerce product photography, photorealistic 4k, organic warm editorial style. "
+            f"Hero: {arrangement_v1} on a {ambiente_v1}. "
+            f"{books_desc} "
+            f"Soft diffused natural studio light, premium editorial mood, ultra sharp detail on all covers."
+        ),
+        2: (
+            f"Warm authentic lifestyle photo for Brazilian e-commerce, photorealistic 4k, natural light. "
+            f"Elderly Brazilian woman 70s, short white curly hair, reading glasses, soft cardigan, "
+            f"{ambiente_v2}, smiling warmly, writing in an open workbook. "
+            f"{arrangement_v2}. "
+            f"{books_desc} "
+            f"Authentic heartwarming expression, shallow depth of field, cinematic warm mood."
+        ),
+        3: (
+            f"Professional overhead flat lay photography for Brazilian e-commerce, photorealistic 4k, warm organic aesthetic. "
+            f"{arrangement_v3} on {ambiente_v3} "
+            f"{books_desc} "
+            f"Soft diffused natural light from above, no harsh shadows, clean airy composition, ultra sharp detail."
+        ),
+    }
+
+
 def gerar_capas_kit(
     kit_id: int,
     kit_nome: str,
@@ -1461,7 +1524,8 @@ def gerar_capas_kit(
     rodape2 = "Apostilas Físicas · Para Idosos 60+"
 
     variacoes = [variacao] if variacao is not None else [1, 2, 3]
-    prompts = _build_ai_prompts(kit_nome, total_exercicios)
+    apostilas_info = [{"nome": a.get("topico_nome", a.get("nome", kit_nome))} for a in apostilas]
+    prompts = _build_kit_ai_prompts(apostilas_info, total_exercicios)
     ai_images = _fetch_ai_images_for_variacoes(variacoes, prompts)
     paths = []
 
