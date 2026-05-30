@@ -8,6 +8,7 @@ import sys
 import time
 import argparse
 import logging
+import itertools
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 import database
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 DRY_RUN = False
 DAILY_LIMIT = 30
 PAUSE_BETWEEN = 5  # seconds
+
+_FATIAS = [30, 60, 90, 120, 150, 200]
+_PRECOS_PRODUTO = {30: 14.90, 60: 19.90, 90: 24.90, 120: 29.90, 150: 34.90, 200: 44.90}
 
 
 def publicar_batch():
@@ -92,6 +96,82 @@ def sincronizar_e_gerar_pdfs():
             logger.error(f"Erro ao gerar PDF apostila {ap['id']}: {e}")
 
 
+def gerar_kits_automaticos():
+    """Gera kits combinando apostilas de tópicos diferentes (2, 3 e 4 por kit).
+
+    Idempotente: kits já existentes são ignorados.
+    Roda diariamente às 6h.
+    """
+    from generator import content as gen_content
+    from generator import images as gen_images
+
+    mapa = database.listar_apostilas_por_topico_e_num_ex()
+    topicos = list(mapa.keys())
+
+    if len(topicos) < 2:
+        logger.info("Kits automáticos: menos de 2 tópicos disponíveis, pulando.")
+        return
+
+    logger.info("Kits automáticos: %d tópicos, gerando combinações 2-4", len(topicos))
+    kits_criados = 0
+    kits_pulados = 0
+
+    for r in [2, 3, 4]:
+        if len(topicos) < r:
+            continue
+        for combo_topicos in itertools.combinations(topicos, r):
+            for num_ex in _FATIAS:
+                # Verifica se todas as apostilas existem para esse tamanho
+                apostila_ids = []
+                for topico_id in combo_topicos:
+                    aid = mapa.get(topico_id, {}).get(num_ex)
+                    if aid is None:
+                        break
+                    apostila_ids.append(aid)
+
+                if len(apostila_ids) != r:
+                    kits_pulados += 1
+                    continue
+
+                # Evita duplicatas
+                if database.kit_existe(apostila_ids):
+                    kits_pulados += 1
+                    continue
+
+                try:
+                    apostilas_objs = [database.buscar_apostila_por_id(aid) for aid in apostila_ids]
+                    nome = gen_content.sugerir_nome_kit(apostilas_objs)
+                    kit_id = database.criar_kit(nome, apostila_ids)
+
+                    # Preço: soma individual com 10% de desconto
+                    preco_individual = _PRECOS_PRODUTO.get(num_ex, 29.90)
+                    preco_kit = round(preco_individual * r * 0.90, 2)
+
+                    total_exercicios = num_ex * r
+                    titulos = gen_content.gerar_titulos_kit_ml(nome, apostilas_objs, total_exercicios)
+                    topico_kit = {"nome": nome}
+                    descricao = gen_content.gerar_descricao_ml(topico_kit, total_exercicios)
+
+                    for i, title in enumerate(titulos, start=1):
+                        image_paths = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs, i)
+                        image_path = image_paths[0] if image_paths else None
+
+                        anuncio_id = database.criar_anuncio(
+                            None, "fisico", i, title["titulo"], preco_kit,
+                            i, title.get("angulo", ""), kit_id, descricao,
+                        )
+                        if image_path:
+                            database.atualizar_anuncio(anuncio_id, imagem_path=image_path)
+
+                    kits_criados += 1
+                    logger.info("Kit criado: %s (%d ex, %d apostilas, R$%.2f)", nome, num_ex, r, preco_kit)
+
+                except Exception as e:
+                    logger.error("Erro ao criar kit automático (%s, %d ex): %s", combo_topicos, num_ex, e)
+
+    logger.info("Kits automáticos concluído: %d criados, %d pulados", kits_criados, kits_pulados)
+
+
 def main():
     global DRY_RUN
 
@@ -116,6 +196,8 @@ def main():
         scheduler.add_job(publicar_batch, "cron", hour=hour, minute=0)
     # Sincroniza vendas e gera PDFs a cada hora
     scheduler.add_job(sincronizar_e_gerar_pdfs, "interval", hours=1)
+    # Gera kits automáticos diariamente às 6h
+    scheduler.add_job(gerar_kits_automaticos, "cron", hour=6, minute=0)
 
     logger.info("Scheduler iniciado. Publicações às 9h, 13h e 17h (horário de Brasília)")
     scheduler.start()
