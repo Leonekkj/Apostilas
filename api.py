@@ -223,14 +223,14 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
     produto_id = None
     try:
         produto_id = await asyncio.to_thread(database.criar_produto, body.nome, body.topico_id, body.serie)
-        conteudo_200_json = await asyncio.to_thread(content.gerar_conteudo, topico, 200)
 
-        # Gera v2 e v3 UMA VEZ para o produto (compartilhado entre apostilas)
-        v2_img, v3_img = await asyncio.to_thread(
-            images.gerar_imagens_compartilhadas, body.nome, topico, body.serie
+        # Fase 1: conteúdo + v2/v3 em PARALELO (maior ganho de tempo)
+        (v2_img, v3_img), conteudo_200_json = await asyncio.gather(
+            asyncio.to_thread(images.gerar_imagens_compartilhadas, body.nome, topico, body.serie),
+            asyncio.to_thread(content.gerar_conteudo, topico, 200),
         )
 
-        # Fase 1: cria todas as apostilas no banco e gera títulos/descrições
+        # Fase 2: cria apostilas no DB (rápido, sequencial)
         apostilas_db = []
         for posicao, num_ex in enumerate(_FATIAS, start=1):
             conteudo_fatia = await asyncio.to_thread(content.fatiar_conteudo, conteudo_200_json, num_ex)
@@ -238,28 +238,31 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
                 database.salvar_apostila, body.topico_id, num_ex, conteudo_fatia, produto_id
             )
             created_apostila_ids.append(apostila_id)
-            titulo = await asyncio.to_thread(content.gerar_titulo_apostila_produto, body.nome, num_ex)
-            descricao = await asyncio.to_thread(content.gerar_descricao_ml, topico, num_ex)
-            apostilas_db.append((posicao, num_ex, apostila_id, titulo, descricao))
+            apostilas_db.append((posicao, num_ex, apostila_id))
 
-        # Fase 2: gera V1 de todas as apostilas EM PARALELO
-        async def _gerar_v1(apostila_id, num_ex, posicao):
-            return await asyncio.to_thread(
-                images.gerar_capa_produto,
-                apostila_id, body.nome, topico, num_ex, posicao, body.serie, v2_img, v3_img,
+        # Fase 3: v1 + títulos + descrições tudo em PARALELO (18 tasks simultâneas)
+        async def _gen_tudo(apostila_id, num_ex, posicao):
+            titulo, descricao, image_paths = await asyncio.gather(
+                asyncio.to_thread(content.gerar_titulo_apostila_produto, body.nome, num_ex),
+                asyncio.to_thread(content.gerar_descricao_ml, topico, num_ex),
+                asyncio.to_thread(
+                    images.gerar_capa_produto,
+                    apostila_id, body.nome, topico, num_ex, posicao, body.serie, v2_img, v3_img,
+                ),
             )
+            return titulo, descricao, image_paths
 
-        all_image_paths = await asyncio.gather(*[
-            _gerar_v1(apostila_id, num_ex, posicao)
-            for posicao, num_ex, apostila_id, _, _ in apostilas_db
+        resultados = await asyncio.gather(*[
+            _gen_tudo(apostila_id, num_ex, posicao)
+            for posicao, num_ex, apostila_id in apostilas_db
         ])
-        for paths in all_image_paths:
-            generated_files.extend(paths)
+        for _, _, image_paths in resultados:
+            generated_files.extend(image_paths)
 
-        # Fase 3: cria anúncios e vincula imagens
+        # Fase 4: cria anúncios (depende dos resultados anteriores)
         apostilas_result = []
         tabela = body.precos or _PRECOS_PRODUTO
-        for (posicao, num_ex, apostila_id, titulo, descricao), image_paths in zip(apostilas_db, all_image_paths):
+        for (posicao, num_ex, apostila_id), (titulo, descricao, image_paths) in zip(apostilas_db, resultados):
             image_path = image_paths[0] if image_paths else None
             preco = float(tabela.get(str(num_ex), tabela.get(num_ex, _PRECOS_PRODUTO.get(num_ex, 29.90))))
             anuncio_id = await asyncio.to_thread(
