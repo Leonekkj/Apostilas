@@ -224,18 +224,16 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
     try:
         produto_id = await asyncio.to_thread(database.criar_produto, body.nome, body.topico_id, body.serie)
 
-        # Fase 1: conteúdo + v2/v3 em PARALELO (maior ganho de tempo)
-        (v2_img, v3_img), conteudo_200_json = await asyncio.gather(
-            asyncio.to_thread(images.gerar_imagens_compartilhadas, body.nome, topico, body.serie),
-            asyncio.to_thread(content.gerar_conteudo, topico, 200),
+        # Fase 1: v2/v3 compartilhadas (imagens do produto)
+        v2_img, v3_img = await asyncio.to_thread(
+            images.gerar_imagens_compartilhadas, body.nome, topico, body.serie
         )
 
-        # Fase 2: cria apostilas no DB (rápido, sequencial)
+        # Fase 2: cria apostilas no DB sem conteúdo (exercícios gerados só após venda)
         apostilas_db = []
         for posicao, num_ex in enumerate(_FATIAS, start=1):
-            conteudo_fatia = await asyncio.to_thread(content.fatiar_conteudo, conteudo_200_json, num_ex)
             apostila_id = await asyncio.to_thread(
-                database.salvar_apostila, body.topico_id, num_ex, conteudo_fatia, produto_id
+                database.salvar_apostila, body.topico_id, num_ex, "", produto_id
             )
             created_apostila_ids.append(apostila_id)
             apostilas_db.append((posicao, num_ex, apostila_id))
