@@ -419,6 +419,40 @@ def criar_kit(nome: str, apostila_ids: list) -> int:
         conn.close()
 
 
+def listar_apostilas_por_topico_e_num_ex() -> dict:
+    """Retorna {topico_id: {num_exercicios: apostila_id}} — apostila mais recente por (topico, tamanho)."""
+    conn = _get_conn()
+    try:
+        cur = conn.execute("""
+            SELECT topico_id, num_exercicios, MAX(id) AS apostila_id
+            FROM apostilas
+            WHERE produto_id IS NOT NULL
+            GROUP BY topico_id, num_exercicios
+        """)
+        result: dict = {}
+        for row in cur.fetchall():
+            t, n, a = row["topico_id"], row["num_exercicios"], row["apostila_id"]
+            result.setdefault(t, {})[n] = a
+        return result
+    finally:
+        conn.close()
+
+
+def kit_existe(apostila_ids: list) -> bool:
+    """Retorna True se já existe kit com exatamente esse conjunto de apostila_ids."""
+    target = sorted(int(x) for x in apostila_ids)
+    conn = _get_conn()
+    try:
+        cur = conn.execute("SELECT apostila_ids FROM kits")
+        for row in cur.fetchall():
+            existing = sorted(int(x) for x in json.loads(row["apostila_ids"] or "[]"))
+            if existing == target:
+                return True
+        return False
+    finally:
+        conn.close()
+
+
 def listar_kits() -> list:
     """Retorna todos os kits com contagem de apostilas."""
     conn = _get_conn()
