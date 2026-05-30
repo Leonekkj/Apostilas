@@ -257,22 +257,37 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
         for _, _, image_paths in resultados:
             generated_files.extend(image_paths)
 
-        # Fase 4: cria anúncios (depende dos resultados anteriores)
+        # Fase 4: cria anúncios físico + digital para cada apostila
         apostilas_result = []
         tabela = body.precos or _PRECOS_PRODUTO
         for (posicao, num_ex, apostila_id), (titulo, descricao, image_paths) in zip(apostilas_db, resultados):
             image_path = image_paths[0] if image_paths else None
-            preco = float(tabela.get(str(num_ex), tabela.get(num_ex, _PRECOS_PRODUTO.get(num_ex, 29.90))))
+            preco_fisico = float(tabela.get(str(num_ex), tabela.get(num_ex, _PRECOS_PRODUTO.get(num_ex, 29.90))))
+
+            # Anúncio físico
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,
-                apostila_id, "fisico", posicao, titulo, preco, posicao, "", None, descricao,
+                apostila_id, "fisico", posicao, titulo, preco_fisico, posicao, "", None, descricao,
             )
             created_anuncio_ids.append(anuncio_id)
             if image_path:
                 await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, imagem_path=image_path)
+
+            # Anúncio digital — 40% do físico, título com "PDF Digital"
+            titulo_digital = (titulo[:52] + " PDF Digital") if len(titulo) > 52 else (titulo + " PDF Digital")
+            preco_digital = round(preco_fisico * 0.40, 2)
+            anuncio_digital_id = await asyncio.to_thread(
+                database.criar_anuncio,
+                apostila_id, "digital", posicao, titulo_digital, preco_digital, posicao, "", None, descricao,
+            )
+            created_anuncio_ids.append(anuncio_digital_id)
+            if image_path:
+                await asyncio.to_thread(database.atualizar_anuncio, anuncio_digital_id, imagem_path=image_path)
+
             apostilas_result.append({
                 "apostila_id": apostila_id, "num_exercicios": num_ex, "posicao": posicao,
-                "preco": preco, "titulo": titulo, "anuncio_id": anuncio_id, "imagem_path": image_path,
+                "preco": preco_fisico, "titulo": titulo, "anuncio_id": anuncio_id,
+                "anuncio_digital_id": anuncio_digital_id, "imagem_path": image_path,
             })
 
         return {"produto_id": produto_id, "nome": body.nome, "serie": body.serie, "apostilas": apostilas_result}
