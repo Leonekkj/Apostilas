@@ -107,6 +107,15 @@ def criar_tabelas() -> None:
             except sqlite3.OperationalError:
                 pass  # column already exists
 
+        for col_name, col_def in [
+            ("comprador_id",  "TEXT DEFAULT ''"),
+            ("pdf_entregue",  "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE vendas ADD COLUMN {col_name} {col_def}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+
         conn.commit()
         seed_topicos(conn)
     finally:
@@ -694,24 +703,50 @@ def salvar_venda(
     valor: float,
     quantidade: int,
     data_venda: str,
+    comprador_id: str = "",
 ) -> None:
     """Upsert de uma venda pelo ml_order_id (não cria duplicatas)."""
     conn = _get_conn()
     try:
         conn.execute(
             """INSERT INTO vendas
-               (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda)
-               VALUES (?, ?, ?, ?, ?, ?)
+               (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda, comprador_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(ml_order_id) DO UPDATE SET
                  anuncio_id=excluded.anuncio_id,
                  comprador_nickname=excluded.comprador_nickname,
                  valor=excluded.valor,
                  quantidade=excluded.quantidade,
                  data_venda=excluded.data_venda,
+                 comprador_id=excluded.comprador_id,
                  sincronizado_em=datetime('now')""",
-            (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda),
+            (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda, comprador_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def marcar_pdf_entregue(ml_order_id: str) -> None:
+    conn = _get_conn()
+    try:
+        conn.execute("UPDATE vendas SET pdf_entregue=1 WHERE ml_order_id=?", (ml_order_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def buscar_venda_por_order_id(ml_order_id: str) -> Optional[dict]:
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            """SELECT v.*, a.tipo AS anuncio_tipo, a.apostila_id
+               FROM vendas v
+               LEFT JOIN anuncios a ON v.anuncio_id = a.id
+               WHERE v.ml_order_id = ?""",
+            (ml_order_id,),
+        ).fetchone()
+        return dict(row) if row else None
     finally:
         conn.close()
 

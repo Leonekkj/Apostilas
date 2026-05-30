@@ -25,7 +25,7 @@ from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 import database
 from ml import client as ml_client
 from ml import orders as ml_orders
+from ml import messages as ml_messages
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -772,6 +773,145 @@ async def ml_listing_types():
         "tipos_vendedor": seller_types,
         "tipos_categoria": cat_types,
     }
+
+
+# ---------------------------------------------------------------------------
+# ML Webhook — entrega automática de PDF após pagamento confirmado
+# ---------------------------------------------------------------------------
+
+@app.post("/api/ml/webhook")
+async def ml_webhook(request: Request):
+    """
+    Recebe notificações do ML (orders, payments).
+    Quando o pagamento é confirmado e o anúncio é digital, envia o PDF ao comprador.
+    """
+    from fastapi import Request as _Request
+    body = await request.json()
+
+    topic = body.get("topic") or body.get("type", "")
+    resource = body.get("resource", "")
+
+    # ML envia notificações de vários tópicos — só interessa orders/payments
+    if topic not in ("orders", "orders_v2", "payments"):
+        return {"status": "ignored", "topic": topic}
+
+    def _processar():
+        import requests as _req
+        from ml import auth as ml_auth_module
+
+        try:
+            token = ml_auth_module.get_valid_token()
+        except RuntimeError:
+            return {"status": "error", "reason": "token ml não configurado"}
+
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Resolve o recurso para obter o pedido
+        if topic in ("orders", "orders_v2"):
+            order_id = resource.strip("/").split("/")[-1]
+            r = _req.get(f"https://api.mercadolibre.com/orders/{order_id}", headers=headers, timeout=15)
+        else:
+            # payment — busca o pedido pelo payment_id
+            payment_id = resource.strip("/").split("/")[-1]
+            r = _req.get(f"https://api.mercadolibre.com/collections/{payment_id}", headers=headers, timeout=15)
+            if r.status_code != 200:
+                return {"status": "error", "reason": r.text[:200]}
+            order_id = str(r.json().get("collection", {}).get("order_id", ""))
+            r = _req.get(f"https://api.mercadolibre.com/orders/{order_id}", headers=headers, timeout=15)
+
+        if r.status_code != 200:
+            return {"status": "error", "reason": r.text[:200]}
+
+        pedido = r.json()
+        order_status = pedido.get("status", "")
+        if order_status != "paid":
+            return {"status": "ignored", "order_status": order_status}
+
+        comprador_id = str(pedido.get("buyer", {}).get("id", ""))
+        comprador_nick = pedido.get("buyer", {}).get("nickname", "")
+
+        entregues = []
+        for item in pedido.get("order_items", []):
+            ml_item_id = item.get("item", {}).get("id", "")
+            valor = float(item.get("unit_price", 0))
+            quantidade = int(item.get("quantity", 1))
+
+            # Registra/atualiza a venda com comprador_id
+            anuncio_id = database.buscar_anuncio_id_por_ml_id(ml_item_id)
+            database.salvar_venda(
+                ml_order_id=order_id,
+                anuncio_id=anuncio_id,
+                comprador_nickname=comprador_nick,
+                valor=valor,
+                quantidade=quantidade,
+                data_venda=pedido.get("date_created", ""),
+                comprador_id=comprador_id,
+            )
+
+            # Só entrega PDF se for anúncio digital ainda não entregue
+            venda = database.buscar_venda_por_order_id(order_id)
+            if not venda or venda.get("pdf_entregue"):
+                continue
+            if venda.get("anuncio_tipo") != "digital":
+                continue
+
+            apostila_id = venda.get("apostila_id")
+            if not apostila_id:
+                continue
+
+            apostila = database.buscar_apostila_por_id(apostila_id)
+            if not apostila or not apostila.get("pdf_path"):
+                continue
+
+            app_url = os.getenv("APP_URL", "http://localhost:8000")
+            pdf_url = _pdf_path_to_url(apostila["pdf_path"])
+            if not pdf_url:
+                continue
+            if pdf_url.startswith("/"):
+                pdf_url = app_url.rstrip("/") + pdf_url
+
+            nome_apostila = apostila.get("topico_nome", "Apostila Cognitiva CogniVita")
+            ok = ml_messages.enviar_pdf_ao_comprador(order_id, comprador_id, pdf_url, nome_apostila)
+            if ok:
+                database.marcar_pdf_entregue(order_id)
+                entregues.append({"order_id": order_id, "apostila_id": apostila_id})
+
+        return {"status": "ok", "entregues": entregues}
+
+    result = await asyncio.to_thread(_processar)
+    return result
+
+
+@app.post("/api/admin/ml/registrar-webhook")
+async def registrar_webhook_ml(_auth=Depends(_require_auth)):
+    """Registra o webhook de notificações no ML para este servidor."""
+    import requests as _req
+    from ml import auth as ml_auth_module
+
+    app_url = os.getenv("APP_URL", "")
+    if not app_url:
+        raise HTTPException(status_code=400, detail="APP_URL não configurada no servidor")
+
+    webhook_url = app_url.rstrip("/") + "/api/ml/webhook"
+
+    try:
+        token = await asyncio.to_thread(ml_auth_module.get_valid_token)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    r = _req.post(
+        "https://api.mercadolibre.com/applications/notification_settings",
+        json={
+            "topics": ["orders_v2"],
+            "url": webhook_url,
+        },
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        timeout=15,
+    )
+
+    if r.status_code in (200, 201):
+        return {"registrado": True, "webhook_url": webhook_url, "response": r.json()}
+    raise HTTPException(status_code=r.status_code, detail=r.text[:300])
 
 
 # ---------------------------------------------------------------------------
