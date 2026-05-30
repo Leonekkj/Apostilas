@@ -1356,6 +1356,14 @@ async function loadProdutos() {
   }
 }
 
+function toRoman(n) {
+  const vals = [[1000,'M'],[900,'CM'],[500,'D'],[400,'CD'],[100,'C'],[90,'XC'],
+                [50,'L'],[40,'XL'],[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']];
+  let r = '';
+  for (const [v, s] of vals) { while (n >= v) { r += s; n -= v; } }
+  return r;
+}
+
 function renderProdutos(list) {
   const grid = document.getElementById('produtos-grid');
   if (!list.length) {
@@ -1365,23 +1373,24 @@ function renderProdutos(list) {
   grid.innerHTML = list.map(p => {
     const total = p.total_anuncios || 0;
     const pub   = p.anuncios_publicados || 0;
+    const rasc  = p.anuncios_rascunho || 0;
     const pct   = total ? Math.round((pub / total) * 100) : 0;
-    const imgSrc = p.pdf_path
-      ? `/output/images/apostila_${p.id}_v1.png`
-      : null;
-    const thumb = imgSrc
-      ? `<img class="card-thumb" src="${imgSrc}" alt="capa" onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>📚</div>'">`
+    const thumbId = p.thumb_apostila_id;
+    const thumb = thumbId
+      ? `<img class="card-thumb" src="/output/images/apostila_${thumbId}_v1.png" alt="capa" onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>📚</div>'">`
       : `<div class="card-thumb-placeholder">📚</div>`;
+    const serieRoman = p.serie ? ` <span style="color:var(--primary);font-weight:600;">Vol. ${toRoman(p.serie)}</span>` : '';
+    const qtdApostilas = (p.apostilas || []).length;
     return `
       <div class="card" id="produto-card-${p.id}">
         ${thumb}
         <div class="card-body">
-          <div class="card-title">${esc(p.topico_nome || 'Apostila')}</div>
-          <div class="card-sub">${p.num_exercicios || 60} exercícios</div>
+          <div class="card-title">${esc(p.nome || p.topico_nome || 'Apostila')}${serieRoman}</div>
+          <div class="card-sub">${qtdApostilas} apostilas · ${esc(p.topico_nome || '')}</div>
           <div class="card-progress-wrap">
             <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
             <div class="progress-label">
-              <span>${pub}</span> publicados &nbsp;·&nbsp; <span>${total - pub}</span> rascunhos
+              <span>${pub}</span> publicados &nbsp;·&nbsp; <span>${rasc}</span> rascunhos
             </div>
           </div>
           <div style="margin-top:8px;text-align:right;">

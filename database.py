@@ -820,13 +820,21 @@ def listar_produtos_com_apostilas() -> list:
             pd = dict(prod)
             apostilas = conn.execute(
                 """SELECT ap.id, ap.num_exercicios, ap.pdf_path, ap.criado_em,
-                          COUNT(an.id) AS total_anuncios,
-                          SUM(CASE WHEN an.status='publicado' THEN 1 ELSE 0 END) AS anuncios_publicados
+                          COUNT(CASE WHEN an.status != 'deletado' THEN 1 END) AS total_anuncios,
+                          SUM(CASE WHEN an.status='publicado' THEN 1 ELSE 0 END) AS anuncios_publicados,
+                          SUM(CASE WHEN an.status='rascunho'  THEN 1 ELSE 0 END) AS anuncios_rascunho
                    FROM apostilas ap LEFT JOIN anuncios an ON an.apostila_id = ap.id
                    WHERE ap.produto_id = ? GROUP BY ap.id ORDER BY ap.num_exercicios""",
                 (pd["id"],)
             ).fetchall()
-            pd["apostilas"] = [dict(a) for a in apostilas]
+            apostilas_list = [dict(a) for a in apostilas]
+            pd["apostilas"] = apostilas_list
+            # Agrega contadores no nível do produto
+            pd["total_anuncios"] = sum(a["total_anuncios"] or 0 for a in apostilas_list)
+            pd["anuncios_publicados"] = sum(a["anuncios_publicados"] or 0 for a in apostilas_list)
+            pd["anuncios_rascunho"] = sum(a["anuncios_rascunho"] or 0 for a in apostilas_list)
+            # ID da primeira apostila (menor num_exercicios) para thumbnail
+            pd["thumb_apostila_id"] = apostilas_list[0]["id"] if apostilas_list else None
             result.append(pd)
         return result
     finally:

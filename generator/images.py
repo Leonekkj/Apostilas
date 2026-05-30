@@ -1241,8 +1241,13 @@ def _gerar_capa(
 
     if variacao in (1, 2, 3):
         if ai_image is not None:
-            # Salva foto AI diretamente sem overlay
-            ai_image.resize(SIZE, Image.LANCZOS).convert("RGB").save(str(path), "PNG")
+            # Aplica overlay Pillow com texto correto sobre a foto AI
+            result = _overlay_branding(
+                ai_image, cor_escura, cor_acento,
+                titulo, badge_texto, rodape_linha1, rodape_linha2,
+                variacao=variacao,
+            )
+            result.save(str(path), "PNG")
             return
         else:
             # Leonardo falhou: fundo verde sólido simples, sem overlay pesado com texto
