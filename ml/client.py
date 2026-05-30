@@ -56,6 +56,11 @@ def publicar_anuncio(anuncio_id: int) -> str:
     if anuncio is None:
         raise RuntimeError(f"Anúncio {anuncio_id} não encontrado")
 
+    # Truncate title to 60 chars in DB if needed (fix stale titles from before the fix)
+    titulo_db = anuncio.get("titulo", "")
+    if len(titulo_db) > 60:
+        database.atualizar_anuncio(anuncio_id, titulo=titulo_db[:60])
+
     # 2. Get valid ML token
     try:
         token = auth.get_valid_token()
@@ -175,7 +180,7 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     Raises:
         RuntimeError: Se falhar ao criar listing.
     """
-    titulo = anuncio.get("titulo", "Apostila Cognitiva")
+    titulo = anuncio.get("titulo", "Apostila Cognitiva")[:60]
     is_digital = anuncio.get("tipo", "fisico") == "digital"
 
     # Build item payload
