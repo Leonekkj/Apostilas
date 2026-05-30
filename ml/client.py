@@ -148,8 +148,9 @@ def _upload_pictures(token: str, imagem_path: str) -> list[str]:
     if match:
         v = int(match.group(1))
         base = imagem_path[:match.start()]
-        for delta in [1, 2]:
-            next_v = (v - 1 + delta) % 6 + 1
+        # Só variações Leonardo (v1-v3); v4-v6 são Pillow puro e não devem ir ao ML
+        others = [x for x in [1, 2, 3] if x != v]
+        for next_v in others[:2]:
             next_path = f"{base}_v{next_v}.png"
             if os.path.exists(next_path):
                 pid = _upload_single(token, next_path)
@@ -175,6 +176,7 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
         RuntimeError: Se falhar ao criar listing.
     """
     titulo = anuncio.get("titulo", "Apostila Cognitiva")
+    is_digital = anuncio.get("tipo", "fisico") == "digital"
 
     # Build item payload
     payload = {
@@ -184,18 +186,21 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
         "currency_id": "BRL",
         "available_quantity": 999,
         "buying_mode": "buy_it_now",
-        "listing_type_id": "gold_premium",
+        "listing_type_id": "gold_pro",
         "condition": "new",
-        "shipping": {
-            "free_shipping": True,
-        },
         "attributes": [
             {"id": "TITLE",     "value_name": titulo[:60]},
             {"id": "PUBLISHER", "value_name": "CogniVita"},
             {"id": "BRAND",     "value_name": "CogniVita"},
-            {"id": "FORMAT",    "value_name": "Físico"},
+            {"id": "FORMAT",    "value_name": "Digital" if is_digital else "Físico"},
         ],
     }
+
+    if is_digital:
+        # Produto digital: sem frete, entrega imediata via mensagem
+        payload["shipping"] = {"mode": "not_specified"}
+    else:
+        payload["shipping"] = {"free_shipping": True}
 
     # Até 3 imagens
     if picture_ids:
@@ -208,9 +213,10 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     }
 
     import json as _json
-    print("ML PAYLOAD:", _json.dumps(payload, ensure_ascii=False))
+    print("[ML] PAYLOAD listing_type_id:", payload.get("listing_type_id"))
     response = requests.post(ML_ITEMS_ENDPOINT, json=payload, headers=headers)
-    print("ML RESPONSE:", response.status_code, response.text[:1000])
+    print("[ML] RESPONSE status:", response.status_code)
+    print("[ML] RESPONSE body:", response.text[:2000])
 
     if response.status_code != 201:
         try:
@@ -221,6 +227,14 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
         raise RuntimeError(f"ML API error {response.status_code}: {error_msg}")
 
     data = response.json()
+    returned_type = data.get("listing_type_id", "unknown")
+    if returned_type != "gold_pro":
+        print(
+            f"[ML] AVISO: ML retornou listing_type_id='{returned_type}' em vez de 'gold_pro'. "
+            "Verifique se a conta ML tem o plano Premium ativo."
+        )
+    else:
+        print(f"[ML] OK: listing criado como Premium (gold_pro): {data.get('id')}")
     return data.get("id")
 
 
