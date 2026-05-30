@@ -273,8 +273,16 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             if image_path:
                 await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, imagem_path=image_path)
 
-            # Anúncio digital — 40% do físico, título com "PDF Digital"
-            titulo_digital = (titulo[:52] + " PDF Digital") if len(titulo) > 52 else (titulo + " PDF Digital")
+            # Anúncio digital — 40% do físico, título limpo + "PDF Digital" (máx 60 chars)
+            _remover = ["Apostila Física", "Apostila Fisica", "Impresso", "Impressa", "Físico", "Fisico"]
+            titulo_base = titulo
+            for palavra in _remover:
+                titulo_base = titulo_base.replace(palavra, "").replace("  ", " ").strip()
+            sufixo = " PDF Digital"
+            max_base = 60 - len(sufixo)
+            if len(titulo_base) > max_base:
+                titulo_base = titulo_base[:max_base].rsplit(" ", 1)[0]
+            titulo_digital = (titulo_base + sufixo)[:60]
             preco_digital = round(preco_fisico * 0.40, 2)
             anuncio_digital_id = await asyncio.to_thread(
                 database.criar_anuncio,

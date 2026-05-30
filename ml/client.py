@@ -197,8 +197,12 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     }
 
     if is_digital:
-        # Produto digital: sem frete, entrega imediata via mensagem
-        payload["shipping"] = {"mode": "not_specified"}
+        # Produto digital: sem envio físico
+        payload["shipping"] = {
+            "mode": "not_specified",
+            "free_shipping": False,
+            "local_pick_up": False,
+        }
     else:
         payload["shipping"] = {"free_shipping": True}
 
