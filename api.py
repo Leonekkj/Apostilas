@@ -240,15 +240,16 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
 
         # Fase 3: v1 + títulos + descrições tudo em PARALELO (18 tasks simultâneas)
         async def _gen_tudo(apostila_id, num_ex, posicao):
-            titulo, descricao, image_paths = await asyncio.gather(
+            titulo, descricao, descricao_digital, image_paths = await asyncio.gather(
                 asyncio.to_thread(content.gerar_titulo_apostila_produto, body.nome, num_ex),
                 asyncio.to_thread(content.gerar_descricao_ml, topico, num_ex),
+                asyncio.to_thread(content.gerar_descricao_digital_ml, topico, num_ex),
                 asyncio.to_thread(
                     images.gerar_capa_produto,
                     apostila_id, body.nome, topico, num_ex, posicao, body.serie, v2_img, v3_img,
                 ),
             )
-            return titulo, descricao, image_paths
+            return titulo, descricao, descricao_digital, image_paths
 
         resultados = await asyncio.gather(*[
             _gen_tudo(apostila_id, num_ex, posicao)
@@ -260,7 +261,7 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
         # Fase 4: cria anúncios físico + digital para cada apostila
         apostilas_result = []
         tabela = body.precos or _PRECOS_PRODUTO
-        for (posicao, num_ex, apostila_id), (titulo, descricao, image_paths) in zip(apostilas_db, resultados):
+        for (posicao, num_ex, apostila_id), (titulo, descricao, descricao_digital, image_paths) in zip(apostilas_db, resultados):
             image_path = image_paths[0] if image_paths else None
             preco_fisico = float(tabela.get(str(num_ex), tabela.get(num_ex, _PRECOS_PRODUTO.get(num_ex, 29.90))))
 
@@ -286,7 +287,7 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             preco_digital = round(preco_fisico * 0.40, 2)
             anuncio_digital_id = await asyncio.to_thread(
                 database.criar_anuncio,
-                apostila_id, "digital", posicao, titulo_digital, preco_digital, posicao, "", None, descricao,
+                apostila_id, "digital", posicao, titulo_digital, preco_digital, posicao, "", None, descricao_digital,
             )
             created_anuncio_ids.append(anuncio_digital_id)
             if image_path:

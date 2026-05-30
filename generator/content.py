@@ -722,6 +722,63 @@ Retorne APENAS o texto acima preenchido, sem JSON, sem markdown, sem comentário
     ], max_tokens=600, json_mode=False).strip()
 
 
+def gerar_descricao_digital_ml(topico: dict, num_exercicios: int) -> str:
+    """Gera descrição para anúncio digital (PDF) no ML."""
+    nome_topico = topico.get("nome", topico.get("name", str(topico)))
+
+    prompt = f"""\
+Crie uma descrição de produto para o Mercado Livre de uma apostila digital em PDF de estimulação cognitiva.
+
+Produto: PDF de {nome_topico} com {num_exercicios} exercícios
+Público: idosos 60+, cuidadores, terapeutas ocupacionais
+Marca: CogniVita
+Entrega: arquivo PDF enviado após confirmação do pagamento
+
+Use EXATAMENTE este formato (mantenha os títulos em maiúscula, use • para bullets):
+
+APOSTILA DIGITAL EM PDF — ESTIMULAÇÃO COGNITIVA PARA IDOSOS
+[1 parágrafo de 2 frases descrevendo o produto digital e o tópico {nome_topico}]
+
+Indicado para:
+• [uso 1]
+• [uso 2]
+• [uso 3]
+• [uso 4]
+
+O QUE VOCÊ RECEBE
+• PDF digital com {num_exercicios} exercícios de {nome_topico}
+• Entrega imediata por mensagem após pagamento confirmado
+• Arquivo pronto para imprimir em casa ou usar no tablet
+• [outro benefício específico do formato digital]
+
+BENEFÍCIOS
+• [benefício 1 relacionado a {nome_topico}]
+• [benefício 2]
+• [benefício 3]
+• Sem esperar entrega — acesso imediato ao material
+
+EXEMPLOS DE ATIVIDADES
+• [atividade 1 específica de {nome_topico}]
+• [atividade 2]
+• [atividade 3]
+• [atividade 4]
+
+ESPECIFICAÇÕES
+• Formato: PDF Digital
+• Quantidade: {num_exercicios} exercícios
+• Tamanho das páginas: A4
+• Impressão recomendada: Preto e Branco
+• Fonte ampliada (ideal para idosos)
+
+Retorne APENAS o texto acima preenchido, sem JSON, sem markdown, sem comentários.\
+"""
+
+    return _chat_completions([
+        {"role": "system", "content": _SYSTEM_TITULOS},
+        {"role": "user", "content": prompt},
+    ], max_tokens=600, json_mode=False).strip()
+
+
 # ---------------------------------------------------------------------------
 # 4. gerar_titulos_kit_ml
 # ---------------------------------------------------------------------------
