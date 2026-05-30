@@ -225,23 +225,42 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
         produto_id = await asyncio.to_thread(database.criar_produto, body.nome, body.topico_id, body.serie)
         conteudo_200_json = await asyncio.to_thread(content.gerar_conteudo, topico, 200)
 
-        apostilas_result = []
+        # Gera v2 e v3 UMA VEZ para o produto (compartilhado entre apostilas)
+        v2_img, v3_img = await asyncio.to_thread(
+            images.gerar_imagens_compartilhadas, body.nome, topico, body.serie
+        )
+
+        # Fase 1: cria todas as apostilas no banco e gera títulos/descrições
+        apostilas_db = []
         for posicao, num_ex in enumerate(_FATIAS, start=1):
             conteudo_fatia = await asyncio.to_thread(content.fatiar_conteudo, conteudo_200_json, num_ex)
             apostila_id = await asyncio.to_thread(
                 database.salvar_apostila, body.topico_id, num_ex, conteudo_fatia, produto_id
             )
             created_apostila_ids.append(apostila_id)
-
-            image_paths = await asyncio.to_thread(
-                images.gerar_capa_produto, apostila_id, body.nome, topico, num_ex, posicao, body.serie
-            )
-            image_path = image_paths[0] if isinstance(image_paths, list) else image_paths
-            generated_files.extend(image_paths if isinstance(image_paths, list) else [image_path])
-
             titulo = await asyncio.to_thread(content.gerar_titulo_apostila_produto, body.nome, num_ex)
             descricao = await asyncio.to_thread(content.gerar_descricao_ml, topico, num_ex)
-            tabela = body.precos or _PRECOS_PRODUTO
+            apostilas_db.append((posicao, num_ex, apostila_id, titulo, descricao))
+
+        # Fase 2: gera V1 de todas as apostilas EM PARALELO
+        async def _gerar_v1(apostila_id, num_ex, posicao):
+            return await asyncio.to_thread(
+                images.gerar_capa_produto,
+                apostila_id, body.nome, topico, num_ex, posicao, body.serie, v2_img, v3_img,
+            )
+
+        all_image_paths = await asyncio.gather(*[
+            _gerar_v1(apostila_id, num_ex, posicao)
+            for posicao, num_ex, apostila_id, _, _ in apostilas_db
+        ])
+        for paths in all_image_paths:
+            generated_files.extend(paths)
+
+        # Fase 3: cria anúncios e vincula imagens
+        apostilas_result = []
+        tabela = body.precos or _PRECOS_PRODUTO
+        for (posicao, num_ex, apostila_id, titulo, descricao), image_paths in zip(apostilas_db, all_image_paths):
+            image_path = image_paths[0] if image_paths else None
             preco = float(tabela.get(str(num_ex), tabela.get(num_ex, _PRECOS_PRODUTO.get(num_ex, 29.90))))
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,
@@ -250,7 +269,6 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             created_anuncio_ids.append(anuncio_id)
             if image_path:
                 await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, imagem_path=image_path)
-
             apostilas_result.append({
                 "apostila_id": apostila_id, "num_exercicios": num_ex, "posicao": posicao,
                 "preco": preco, "titulo": titulo, "anuncio_id": anuncio_id, "imagem_path": image_path,

@@ -1279,13 +1279,87 @@ POOL_DIR = OUTPUT_DIR.parent / "images" / "pool"
 
 
 def _pick_pool(variacao: int) -> "str | None":
-    """Retorna caminho aleatório do pool para v2 ou v3, ou None se pool vazio."""
+    """Retorna caminho aleatório do pool legado (v2/v3 genérico), ou None se pool vazio."""
     import random
     pool = POOL_DIR / f"v{variacao}"
     if not pool.exists():
         return None
     imgs = list(pool.glob("*.png"))
     return str(random.choice(imgs)) if imgs else None
+
+
+# ---------------------------------------------------------------------------
+# Pool por tópico (v1: topico+num_ex, v2: topico)
+# ---------------------------------------------------------------------------
+
+POOL_TOPICOS = OUTPUT_DIR.parent / "images" / "pool_topicos"
+
+
+def _pool_dir_v1(topico_slug: str, num_exercicios: int) -> Path:
+    return POOL_TOPICOS / topico_slug / "v1" / str(num_exercicios)
+
+
+def _pool_dir_v2(topico_slug: str) -> Path:
+    return POOL_TOPICOS / topico_slug / "v2"
+
+
+def _pool_dir_v3() -> Path:
+    return POOL_TOPICOS / "_geral" / "v3"
+
+
+def _pick_from_pool(pool_dir: Path) -> "str | None":
+    import random
+    if not pool_dir.exists():
+        return None
+    imgs = list(pool_dir.glob("*.png"))
+    return str(random.choice(imgs)) if imgs else None
+
+
+def _save_to_pool(img: "Image.Image", pool_dir: Path) -> None:
+    import shutil as _shutil
+    pool_dir.mkdir(parents=True, exist_ok=True)
+    n = len(list(pool_dir.glob("*.png")))
+    img.resize(SIZE, Image.LANCZOS).convert("RGB").save(str(pool_dir / f"pool_{n+1:03d}.png"), "PNG")
+    logger.info("Salvo no pool: %s/pool_%03d.png", pool_dir.name, n + 1)
+
+
+def gerar_imagens_compartilhadas(
+    nome_produto: str,
+    topico: dict,
+    serie: int = 1,
+) -> "tuple[Image.Image | None, Image.Image | None]":
+    """Gera (ou sorteia do pool) v2 e v3 para compartilhar entre as apostilas do produto."""
+    topico_slug = topico.get("slug", "geral")
+    serie_romano = _to_roman(serie)
+    prompts = _build_ai_prompts(nome_produto, 60, serie_romano=serie_romano)
+
+    # V2 — lifestyle por tópico
+    pool_v2 = _pool_dir_v2(topico_slug)
+    pool_path = _pick_from_pool(pool_v2)
+    if pool_path:
+        v2_img = Image.open(pool_path).convert("RGB")
+        logger.info("V2: sorteado do pool %s/%s", topico_slug, Path(pool_path).name)
+    else:
+        ai_images = _fetch_ai_images_for_variacoes([2], prompts)
+        ai_entry = ai_images.get(2)
+        v2_img = ai_entry[0] if ai_entry else None
+        if v2_img:
+            _save_to_pool(v2_img, pool_v2)
+
+    # V3 — flat lay genérico
+    pool_v3 = _pool_dir_v3()
+    pool_path3 = _pick_from_pool(pool_v3)
+    if pool_path3:
+        v3_img = Image.open(pool_path3).convert("RGB")
+        logger.info("V3: sorteado do pool geral/%s", Path(pool_path3).name)
+    else:
+        ai_images3 = _fetch_ai_images_for_variacoes([3], prompts)
+        ai_entry3 = ai_images3.get(3)
+        v3_img = ai_entry3[0] if ai_entry3 else None
+        if v3_img:
+            _save_to_pool(v3_img, pool_v3)
+
+    return v2_img, v3_img
 
 
 def gerar_pool(n: int = 10) -> dict:
@@ -1409,13 +1483,18 @@ def gerar_capa_produto(
     num_exercicios: int,
     posicao: int,
     serie: int = 1,
+    v2_img: "Image.Image | None" = None,
+    v3_img: "Image.Image | None" = None,
 ) -> list[str]:
     """Gera 3 capas para uma apostila de linha de produto.
 
-    Sempre produz v1 (produto AI), v2 e v3 (pool ou AI).
-    Retorna [v1_path, v2_path, v3_path] — o primeiro é o imagem_path do anúncio.
+    V1: sorteado do pool (topico+num_ex) ou gerado novo → salvo no pool.
+    V2/V3: usa imagens pré-geradas passadas por parâmetro (compartilhadas no produto).
+    Retorna [v1_path, v2_path, v3_path].
     """
+    import shutil as _shutil
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    topico_slug = topico.get("slug", "geral")
     serie_romano = _to_roman(serie)
     titulo_capa = f"{nome_produto} {serie_romano}"
     badge   = f"✦ {num_exercicios} EXERCÍCIOS ✦"
@@ -1425,29 +1504,31 @@ def gerar_capa_produto(
 
     paths = []
 
-    # V1: sempre gera nova imagem AI (produto em destaque)
+    # V1: verifica pool (topico + num_ex), senão gera e salva no pool
     fname_v1 = OUTPUT_DIR / f"apostila_{apostila_id}_v1.png"
-    ai_images_v1 = _fetch_ai_images_for_variacoes([1], prompts)
-    ai_entry = ai_images_v1.get(1)
-    ai_img, ai_src = ai_entry if ai_entry else (None, None)
-    _gerar_capa(fname_v1, 1, titulo_capa, badge, rodape1, rodape2,
-                ai_image=ai_img, ai_source=ai_src)
+    pool_v1 = _pool_dir_v1(topico_slug, num_exercicios)
+    pool_path = _pick_from_pool(pool_v1)
+    if pool_path:
+        _shutil.copy(pool_path, str(fname_v1))
+        logger.info("V1: sorteado do pool %s/%s ex/%s", topico_slug, num_exercicios, Path(pool_path).name)
+    else:
+        ai_images_v1 = _fetch_ai_images_for_variacoes([1], prompts)
+        ai_entry = ai_images_v1.get(1)
+        ai_img, ai_src = ai_entry if ai_entry else (None, None)
+        _gerar_capa(fname_v1, 1, titulo_capa, badge, rodape1, rodape2,
+                    ai_image=ai_img, ai_source=ai_src)
+        if fname_v1.exists():
+            _save_to_pool(Image.open(str(fname_v1)), pool_v1)
     paths.append(str(fname_v1))
 
-    # V2 e V3: usa pool se disponível, senão gera via AI
-    for v in [2, 3]:
+    # V2/V3: usa imagens compartilhadas do produto
+    for v, shared_img in [(2, v2_img), (3, v3_img)]:
         fname = OUTPUT_DIR / f"apostila_{apostila_id}_v{v}.png"
-        pool_path = _pick_pool(v)
-        if pool_path:
-            import shutil
-            shutil.copy(pool_path, str(fname))
-            logger.info("V%s: usando pool %s para apostila %s", v, Path(pool_path).name, apostila_id)
+        if shared_img is not None:
+            shared_img.resize(SIZE, Image.LANCZOS).convert("RGB").save(str(fname), "PNG")
         else:
-            ai_images_v = _fetch_ai_images_for_variacoes([v], prompts)
-            ai_entry_v = ai_images_v.get(v)
-            ai_img_v, ai_src_v = ai_entry_v if ai_entry_v else (None, None)
-            _gerar_capa(fname, v, titulo_capa, badge, rodape1, rodape2,
-                        ai_image=ai_img_v, ai_source=ai_src_v)
+            # fallback: Pillow puro se imagens compartilhadas não disponíveis
+            _gerar_capa(fname, v if v <= 6 else 1, titulo_capa, badge, rodape1, rodape2)
         paths.append(str(fname))
 
     return paths
