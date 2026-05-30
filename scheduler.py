@@ -153,7 +153,8 @@ def gerar_kits_automaticos():
                     descricao = gen_content.gerar_descricao_ml(topico_kit, total_exercicios)
 
                     for i, title in enumerate(titulos, start=1):
-                        image_paths = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs, i)
+                        variacao_img = ((i - 1) % 3) + 1  # 1,2,3,1,2,3 para os 6 anúncios
+                        image_paths = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs, variacao_img)
                         image_path = image_paths[0] if image_paths else None
 
                         anuncio_id = database.criar_anuncio(
