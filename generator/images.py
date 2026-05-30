@@ -45,10 +45,39 @@ def _subtitulo(titulo: str) -> str:
     return "Exercícios para uma mente ativa e feliz"
 
 
+_AMBIENTES_V1 = [
+    "light oak wooden surface. Side props: small eucalyptus sprig, reading glasses with thin gold frame, ceramic mug of tea, mini potted succulent. Soft diffused natural studio light from upper left.",
+    "white marble surface with subtle grey veining. Side props: dried lavender bunch, gold paper clips, small green plant, open notebook. Clean bright studio light from above.",
+    "warm walnut wooden desk. Side props: vintage pen, ceramic bowl with smooth stones, small cactus, linen cloth. Warm afternoon window light from the right.",
+    "light grey linen textured surface. Side props: eucalyptus branch, round gold-rimmed glasses, espresso cup, small succulent. Soft overcast natural light, airy mood.",
+    "pale cream painted wood surface. Side props: yellow pencils, washi tape roll, dried wildflowers, small journal. Bright diffused studio light, clean minimal aesthetic.",
+]
+
+_AMBIENTES_V2 = [
+    "sitting at a light wooden table near a large window. Ceramic mug of tea, small green plant in soft-focus background, warm golden window light streaming in.",
+    "sitting at a cozy kitchen table with natural light. A cup of coffee, reading glasses case, and a small vase with flowers in soft focus background.",
+    "sitting in a comfortable armchair near a window. A side table with a glass of water and a small plant, warm afternoon light.",
+    "sitting at a desk in a bright home office. Bookshelves softly blurred in background, natural light from a side window, warm and welcoming atmosphere.",
+    "sitting at a garden patio table in soft morning light. Greenery softly blurred in background, ceramic mug on table, gentle natural sunlight.",
+]
+
+_AMBIENTES_V3 = [
+    "warm linen surface. Props: two yellow pencils, gold paper clips, a ceramic coffee mug, pressed dried eucalyptus leaves, reading glasses with thin gold frame, small succulent plant.",
+    "white marble surface. Props: fine-tip pens, small potted herb, washi tape strips, gold binder clips, dried flowers, clean minimal composition.",
+    "natural wood grain surface. Props: vintage pencils, leather bookmark, ceramic inkwell, dried lavender, round pebbles, warm organic feel.",
+    "pale grey felt surface. Props: coloured pencils, small notebook, paper clips, dried chamomile flowers, clean and soft aesthetic.",
+    "cream linen tablecloth. Props: wooden ruler, watercolour paint set, fine brushes, small plant cutting in glass, warm creative studio mood.",
+]
+
+
 def _build_ai_prompts(titulo: str, num_exercicios: int = 60, serie_romano: str = "") -> dict:
     """Gera prompts para Cognivita com título, série e quantidade de exercícios."""
+    import random
     sub = _subtitulo(titulo)
     ex = f"{num_exercicios} EXERCICIOS"
+    ambiente_v1 = random.choice(_AMBIENTES_V1)
+    ambiente_v2 = random.choice(_AMBIENTES_V2)
+    ambiente_v3 = random.choice(_AMBIENTES_V3)
     serie_linha = (f"Below the title: smaller elegant text \"Volume {serie_romano}\" in sage green italic. "
                    if serie_romano else "")
     subtitulo_linha = f"Below: italic text \"{sub}\" in sage green. "
@@ -74,22 +103,20 @@ def _build_ai_prompts(titulo: str, num_exercicios: int = 60, serie_romano: str =
         # v1 — Produto isolado: livro fechado em destaque
         1: (
             f"Ultra professional e-commerce product photography, photorealistic 4k, organic warm editorial style. "
-            f"Hero: one thick closed spiral-bound workbook standing upright centered on a light oak wooden surface, cover fully sharp and in focus. "
+            f"Hero: one thick closed spiral-bound workbook standing upright centered on a {ambiente_v1}, cover fully sharp and in focus. "
             f"Cover design: warm cream background with subtle watercolor organic shapes in dark forest green at top and bottom edges. "
             f"{cover_desc_v1}"
             f"Warm gold spiral binding on left side, thick pages visible on right side showing book depth. "
-            f"Table surface: warm natural linen. Side props: small eucalyptus sprig, reading glasses with thin gold frame, ceramic mug of tea, mini potted succulent. "
-            f"Soft diffused natural studio light from upper left, gentle warm shadow on right, airy premium editorial mood, ultra sharp cover detail."
+            f"Gentle warm shadow, airy premium editorial mood, ultra sharp cover detail."
         ),
         # v2 — Lifestyle: idosa usando o caderno
         2: (
-            f"Warm authentic lifestyle photo for Brazilian e-commerce, photorealistic 4k, golden hour natural light. "
-            f"Elderly Brazilian woman 70s, short white curly hair, reading glasses, soft beige cardigan, "
-            f"sitting at a light wooden table near a large window, smiling warmly, writing with a pen in a large open spiral workbook "
+            f"Warm authentic lifestyle photo for Brazilian e-commerce, photorealistic 4k, natural light. "
+            f"Elderly Brazilian woman 70s, short white curly hair, reading glasses, soft cardigan, "
+            f"{ambiente_v2}, smiling warmly, writing with a pen in a large open spiral workbook "
             f"showing cognitive exercise pages with word searches and number grids printed in large clear font for seniors. "
-            f"Standing upright beside her on the table: a closed spiral-bound workbook facing the camera, cover fully visible and sharp. "
+            f"Standing upright beside her: a closed spiral-bound workbook facing the camera, cover fully visible and sharp. "
             f"Cover design: warm cream background with organic watercolor green shapes at edges, {cover_desc_v2}"
-            f"Ceramic mug of tea, small green plant in soft-focus background, warm golden window light streaming in. "
             f"Authentic heartwarming expression, shallow depth of field, cinematic warm mood."
         ),
         # v3 — Flat lay: caderno aberto visto de cima
@@ -98,8 +125,7 @@ def _build_ai_prompts(titulo: str, num_exercicios: int = 60, serie_romano: str =
             f"Center: large open spiral-bound workbook showing two pages of cognitive exercises — word searches, number sequences and memory grids printed in large clear font for seniors, pages bright white and sharp. "
             f"Propped upright against the open workbook: one closed spiral-bound workbook with cover fully visible. "
             f"Cover design: warm cream background with organic watercolor green shapes, {cover_desc_v3}"
-            f"Props arranged organically around the books on warm linen surface: two yellow pencils, gold paper clips, "
-            f"a ceramic coffee mug, pressed dried eucalyptus leaves, reading glasses with thin gold frame, small succulent plant. "
+            f"Props on {ambiente_v3} "
             f"Soft diffused natural light from above, no harsh shadows, clean airy composition, ultra sharp detail on both books."
         ),
     }
