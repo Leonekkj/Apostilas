@@ -255,7 +255,7 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             _gen_tudo(apostila_id, num_ex, posicao)
             for posicao, num_ex, apostila_id in apostilas_db
         ])
-        for _, _, image_paths in resultados:
+        for _, _, _, image_paths in resultados:
             generated_files.extend(image_paths)
 
         # Fase 4: cria anúncios físico + digital para cada apostila
