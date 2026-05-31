@@ -12,21 +12,33 @@ logger = logging.getLogger(__name__)
 
 
 def _instalar_playwright():
-    """Instala o browser Chromium do Playwright se ainda não estiver disponível."""
-    # Remove variável que bloqueia download (usada para evitar auto-install no build do Render)
+    """Instala playwright + Chromium em runtime (não está no requirements.txt)."""
     env = os.environ.copy()
     env.pop("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", None)
+
+    # 1. Instala o pacote Python playwright se não estiver disponível
+    try:
+        import playwright  # noqa: F401
+        logger.info("Playwright já instalado")
+    except ImportError:
+        logger.info("Instalando playwright via pip...")
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "playwright>=1.40.0"],
+            check=True, timeout=120,
+        )
+
+    # 2. Instala o browser Chromium
     try:
         result = subprocess.run(
             [sys.executable, "-m", "playwright", "install", "chromium"],
-            capture_output=True, text=True, timeout=180, env=env,
+            capture_output=True, text=True, timeout=300, env=env,
         )
         if result.returncode == 0:
             logger.info("Playwright Chromium instalado com sucesso")
         else:
-            logger.warning(f"playwright install retornou {result.returncode}: {result.stderr[:200]}")
+            logger.warning(f"playwright install: {result.stderr[:300]}")
     except Exception as e:
-        logger.warning(f"Falha ao instalar playwright: {e}")
+        logger.warning(f"Falha ao instalar Chromium: {e}")
 
 
 def main():
