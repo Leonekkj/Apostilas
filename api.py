@@ -439,7 +439,8 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
         # Fase 2: gera imagens em paralelo para todos os volumes
         async def _gerar_imagem(apostila_id, num_puzzles):
             try:
-                paths = await asyncio.to_thread(gen_images.gerar_capas, apostila_id, topico_cp, num_puzzles, 1)
+                # Sem variacao= gera v1, v2 e v3; retorna v1 para imagem_path
+                paths = await asyncio.to_thread(gen_images.gerar_capas, apostila_id, topico_cp, num_puzzles)
                 return paths[0] if paths else ""
             except Exception:
                 return ""
