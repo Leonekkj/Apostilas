@@ -113,6 +113,60 @@ _PRECOS_CACA_PALAVRAS = {
     "gigante": 34.90,
 }
 
+_TEMAS_LABEL = {
+    "geral":     "para Idosos",
+    "futebol":   "de Futebol",
+    "culinaria": "de Culinária",
+    "animais":   "de Animais",
+    "brasil":    "Tema Brasil",
+    "musica":    "de Música",
+    "natureza":  "de Natureza",
+}
+
+_NIVEL_LABEL = {
+    "facil":   "Fácil",
+    "medio":   "Médio",
+    "dificil": "Difícil",
+    "gigante": "Gigante",
+}
+
+
+def _titulo_caca_palavras(nome: str, tema: str, dificuldade: str, num_puzzles: int) -> str:
+    tema_l  = _TEMAS_LABEL.get(tema, tema.title())
+    nivel_l = _NIVEL_LABEL.get(dificuldade, dificuldade.title())
+    titulo = f"Caça-Palavras {tema_l} para Idosos — {num_puzzles} Puzzles Nível {nivel_l} | PDF Digital"
+    return titulo[:120]
+
+
+def _descricao_caca_palavras(tema: str, dificuldade: str, num_puzzles: int) -> str:
+    tema_l  = _TEMAS_LABEL.get(tema, tema.title())
+    nivel_l = _NIVEL_LABEL.get(dificuldade, dificuldade.title())
+    linhas = [
+        f"✅ {num_puzzles} caça-palavras {tema_l} — Nível {nivel_l}",
+        "✅ Gabarito completo incluído no final",
+        "✅ PDF digital — receba na hora e imprima em casa",
+        "✅ Letra grande e grade espaçada — ideal para idosos 60+",
+        "✅ Excelente para estimulação cognitiva e passatempo",
+        "",
+        "📦 COMO FUNCIONA:",
+        "Após a compra você recebe o link para download do PDF. Imprima quantas vezes quiser.",
+        "",
+        "📐 DIFICULDADE:",
+    ]
+    desc_dif = {
+        "facil":   "Grade 12×12 · 8 palavras por puzzle · Direções horizontal e vertical",
+        "medio":   "Grade 15×15 · 12 palavras por puzzle · Inclui diagonal",
+        "dificil": "Grade 18×18 · 18 palavras por puzzle · Todas as direções incluindo reverso",
+        "gigante": f"300 puzzles em nível médio — o maior volume disponível",
+    }
+    linhas.append(desc_dif.get(dificuldade, ""))
+    linhas += [
+        "",
+        "🧠 CogniVita — Especialistas em Estimulação Cognitiva para Idosos",
+        "cognivita.com.br",
+    ]
+    return "\n".join(linhas)
+
 
 def _get_preco(num_exercicios: int) -> float:
     defaults = {30: 14.90, 60: 29.90, 90: 34.90, 120: 39.90, 150: 44.90, 200: 44.90}
@@ -360,13 +414,12 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
         await asyncio.to_thread(
             database.salvar_conteudo_apostila, apostila_id, "{}", pdf_path
         )
-        preco = _PRECOS_CACA_PALAVRAS.get(body.dificuldade, 17.90)
-        # Temáticos têm o mesmo preço do Médio
-        if body.tema != "geral" and body.dificuldade not in _PRECOS_CACA_PALAVRAS:
-            preco = 17.90
+        preco     = _PRECOS_CACA_PALAVRAS.get(body.dificuldade, 17.90)
+        titulo_ml = _titulo_caca_palavras(body.nome, body.tema, body.dificuldade, body.num_puzzles)
+        descricao = _descricao_caca_palavras(body.tema, body.dificuldade, body.num_puzzles)
         anuncio_id = await asyncio.to_thread(
             database.criar_anuncio,
-            apostila_id, "digital", 1, body.nome, preco,
+            apostila_id, "digital", 1, titulo_ml, preco, 1, "", None, descricao,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao criar caça-palavras: {exc}") from exc
