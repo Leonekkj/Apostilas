@@ -19,8 +19,14 @@ ML_API_BASE = "https://api.mercadolibre.com"
 ML_PICTURES_ENDPOINT = f"{ML_API_BASE}/pictures"
 ML_ITEMS_ENDPOINT = f"{ML_API_BASE}/items"
 
-# MLB445795 = Cursos Completos (digital educacional — menos sujeito a bloqueios de PI)
-ML_CATEGORIA_ID = os.getenv("ML_CATEGORIA_ID", "MLB445795")
+# MLB437616 = Livros Físicos  (físico — categoria correta para apostilas impressas)
+# MLB1227   = Outros/Livros   (digital — Ebooks trava por PI; Cursos desativa por não encaixar)
+ML_CATEGORIA_FISICO_ID  = os.getenv("ML_CATEGORIA_FISICO_ID",  "MLB437616")
+ML_CATEGORIA_DIGITAL_ID = os.getenv("ML_CATEGORIA_DIGITAL_ID", "MLB1227")
+# Legado: se ML_CATEGORIA_ID estiver setado, sobrescreve ambos
+_legado = os.getenv("ML_CATEGORIA_ID")
+if _legado:
+    ML_CATEGORIA_FISICO_ID = ML_CATEGORIA_DIGITAL_ID = _legado
 
 # Pasta com imagens reais da marca CogniVita (jpg/jpeg/png, até 3 usadas por listing)
 _BRAND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "brand")
@@ -234,11 +240,12 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     """
     titulo = _fit_titulo(anuncio.get("titulo", "Apostila Cognitiva"))
     is_digital = anuncio.get("tipo", "fisico") == "digital"
+    categoria_id = ML_CATEGORIA_DIGITAL_ID if is_digital else ML_CATEGORIA_FISICO_ID
 
     # Build item payload
     payload = {
         "title": titulo,
-        "category_id": ML_CATEGORIA_ID,
+        "category_id": categoria_id,
         "price": float(anuncio.get("preco", 0)),
         "currency_id": "BRL",
         "available_quantity": 999,
@@ -246,11 +253,9 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
         "listing_type_id": "gold_pro",
         "condition": "new",
         "attributes": [
-            {"id": "COURSE_TITLE",  "value_name": titulo},
-            {"id": "COURSE_FORMAT", "value_name": "Digital" if is_digital else "Online"},
-            {"id": "BRAND",         "value_name": "CogniVita"},
-            {"id": "AUTHOR",        "value_name": "CogniVita"},
-            {"id": "LANGUAGE",      "value_name": "Português"},
+            {"id": "BRAND",    "value_name": "CogniVita"},
+            {"id": "AUTHOR",   "value_name": "CogniVita"},
+            {"id": "LANGUAGE", "value_name": "Português"},
         ],
     }
 
