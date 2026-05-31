@@ -193,7 +193,7 @@ def _renderizar_grid(grid: list[list[str]], gabarito: list[list[str]] | None = N
         ("LEFTPADDING",   (0, 0), (-1, -1), 1),
         ("RIGHTPADDING",  (0, 0), (-1, -1), 1),
     ]
-    if gabarito:
+    if gabarito is not None:
         for r, row in enumerate(gabarito):
             for c, cell in enumerate(row):
                 if cell != ".":
@@ -245,9 +245,6 @@ def gerar_pdf_caca_palavras(apostila_id: int, produto_nome: str, tema: str, difi
                                         alignment=TA_CENTER, leading=26)
     estilo_capa_sub    = ParagraphStyle("cap_s", fontName=FR, fontSize=14, textColor=C_BLUE_LIGHT,
                                         alignment=TA_CENTER, leading=18)
-    estilo_gab_label   = ParagraphStyle("gab",   fontName=FB, fontSize=9,  textColor=C_DARK,
-                                        alignment=TA_CENTER, leading=11)
-
     doc = SimpleDocTemplate(
         str(pdf_path),
         pagesize=A4,
@@ -308,7 +305,8 @@ def gerar_pdf_caca_palavras(apostila_id: int, produto_nome: str, tema: str, difi
             ]))
             flowables.append(tbl_gab)
             flowables.append(Spacer(1, 4 * mm))
-        flowables.append(PageBreak())
+        if i + 4 < len(puzzles):
+            flowables.append(PageBreak())
 
     doc.build(flowables)
     return str(pdf_path.resolve())
