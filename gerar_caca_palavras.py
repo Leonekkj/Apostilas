@@ -119,9 +119,9 @@ def gerar_puzzles(tema: str, dificuldade: str, num_puzzles: int) -> list[dict]:
         for palavra in disponiveis:
             if len(palavras_encaixadas) >= num_palavras:
                 break
-            dr, dc = _DELTA[random.choice(direcoes)]
             encaixou = False
             for _ in range(100):  # 100 tentativas por palavra
+                dr, dc = _DELTA[random.choice(direcoes)]
                 row = random.randint(0, tamanho - 1)
                 col = random.randint(0, tamanho - 1)
                 if _cabe(grid, palavra, row, col, dr, dc):
