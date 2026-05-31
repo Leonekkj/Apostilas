@@ -1711,13 +1711,12 @@ function _renderAnuncioRow(a) {
     </tr>`;
 }
 
-function toggleGrupo(grupoKey) {
-  _gruposExpandidos[grupoKey] = !_gruposExpandidos[grupoKey];
-  const rows = document.querySelectorAll(`[data-grupo="${CSS.escape(grupoKey)}"]`);
-  const btn = document.getElementById(`toggle-${CSS.escape(grupoKey)}`);
-  const expanded = _gruposExpandidos[grupoKey];
-  rows.forEach(r => r.style.display = expanded ? '' : 'none');
-  if (btn) btn.textContent = expanded ? '▾' : '▸';
+function toggleGrupo(idx) {
+  _gruposExpandidos[idx] = !_gruposExpandidos[idx];
+  const expanded = _gruposExpandidos[idx];
+  document.querySelectorAll(`[data-grupo="${idx}"]`).forEach(r => r.style.display = expanded ? '' : 'none');
+  const icon = document.getElementById(`toggle-icon-${idx}`);
+  if (icon) icon.textContent = expanded ? '▾' : '▸';
 }
 
 function renderAnuncios(list) {
@@ -1736,19 +1735,20 @@ function renderAnuncios(list) {
   }
 
   let html = '';
+  let idx = 0;
   for (const [grupoKey, anuncios] of Object.entries(grupos)) {
-    // Inicializa expandido por padrão
-    if (_gruposExpandidos[grupoKey] === undefined) _gruposExpandidos[grupoKey] = true;
-    const expanded = _gruposExpandidos[grupoKey];
+    if (_gruposExpandidos[idx] === undefined) _gruposExpandidos[idx] = true;
+    const expanded = _gruposExpandidos[idx];
     const pub = anuncios.filter(a => a.status === 'publicado').length;
     const total = anuncios.length;
+    const i = idx;
 
     html += `
       <tr style="background:var(--surface,#f5f5f0);border-top:2px solid var(--border);">
         <td colspan="9" style="padding:8px 12px;">
-          <button id="toggle-${grupoKey}" onclick="toggleGrupo('${grupoKey.replace(/'/g,"\\'")}'))"
+          <button onclick="toggleGrupo(${i})"
             style="background:none;border:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--text);padding:0;display:flex;align-items:center;gap:6px;">
-            <span style="font-size:16px;">${expanded ? '▾' : '▸'}</span>
+            <span id="toggle-icon-${i}" style="font-size:16px;">${expanded ? '▾' : '▸'}</span>
             ${esc(grupoKey)}
             <span style="font-weight:400;color:var(--muted);font-size:12px;">${pub} publicados · ${total} total</span>
           </button>
@@ -1757,8 +1757,9 @@ function renderAnuncios(list) {
 
     for (const a of anuncios) {
       const row = _renderAnuncioRow(a);
-      html += row.replace('<tr ', `<tr data-grupo="${grupoKey}" style="display:${expanded ? '' : 'none'}" `);
+      html += row.replace('<tr ', `<tr data-grupo="${i}" style="display:${expanded ? '' : 'none'}" `);
     }
+    idx++;
   }
   tbody.innerHTML = html;
 }
