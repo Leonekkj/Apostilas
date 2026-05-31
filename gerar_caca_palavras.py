@@ -6,6 +6,23 @@ import json
 import random
 import unicodedata
 from pathlib import Path
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib.colors import HexColor, white
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
+# ──────────────────────────────────────────────────────
+# Paleta visual
+# ──────────────────────────────────────────────────────
+C_BLUE       = HexColor("#2E6DA4")
+C_BLUE_LIGHT = HexColor("#EBF3FA")
+C_DARK       = HexColor("#2B2B2B")
+C_GRAY       = HexColor("#CCCCCC")
+FB = "Helvetica-Bold"
+FR = "Helvetica"
+W, H = A4
 
 # ──────────────────────────────────────────────────────
 # Configurações por dificuldade
@@ -139,3 +156,159 @@ def gerar_puzzles(tema: str, dificuldade: str, num_puzzles: int) -> list[dict]:
         })
 
     return puzzles
+
+
+def _renderizar_grid(grid: list[list[str]], gabarito: list[list[str]] | None = None, escala: float = 1.0) -> Table:
+    """Converte grid em Table ReportLab. gabarito destaca letras das palavras."""
+    tamanho = len(grid)
+    cell_size = (14 * mm) * escala
+
+    table_data = []
+    for r, row in enumerate(grid):
+        linha = []
+        for c, letra in enumerate(row):
+            is_palavra = gabarito is not None and gabarito[r][c] != "."
+            style = ParagraphStyle(
+                "cell",
+                fontName=FB if is_palavra else FR,
+                fontSize=int(11 * escala),
+                textColor=C_DARK,
+                alignment=TA_CENTER,
+                leading=int(13 * escala),
+            )
+            linha.append(Paragraph(letra, style))
+        table_data.append(linha)
+
+    col_widths = [cell_size] * tamanho
+    row_heights = [cell_size] * tamanho
+
+    tbl = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
+    grid_style = [
+        ("GRID",          (0, 0), (-1, -1), 0.5, C_GRAY),
+        ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("BACKGROUND",    (0, 0), (-1, -1), white),
+        ("TOPPADDING",    (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 1),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 1),
+    ]
+    if gabarito:
+        for r, row in enumerate(gabarito):
+            for c, cell in enumerate(row):
+                if cell != ".":
+                    grid_style.append(("BACKGROUND", (c, r), (c, r), C_BLUE_LIGHT))
+    tbl.setStyle(TableStyle(grid_style))
+    return tbl
+
+
+def _pagina_puzzle(puzzle: dict, numero: int, produto_nome: str, dificuldade: str) -> list:
+    """Retorna lista de flowables ReportLab para uma página de puzzle."""
+    nivel_label = {"facil": "Fácil", "medio": "Médio", "dificil": "Difícil", "gigante": "Médio"}.get(dificuldade, "")
+
+    estilo_titulo = ParagraphStyle("titulo", fontName=FB, fontSize=13, textColor=C_BLUE,
+                                   alignment=TA_CENTER, leading=16)
+    estilo_sub    = ParagraphStyle("sub",    fontName=FR, fontSize=10, textColor=C_DARK,
+                                   alignment=TA_CENTER, leading=13)
+    estilo_lista  = ParagraphStyle("lista",  fontName=FB, fontSize=11, textColor=C_DARK,
+                                   alignment=TA_LEFT, leading=15)
+
+    flowables = []
+    flowables.append(Paragraph(produto_nome, estilo_titulo))
+    flowables.append(Paragraph(f"Puzzle #{numero} — Nível {nivel_label}", estilo_sub))
+    flowables.append(Spacer(1, 6 * mm))
+    flowables.append(_renderizar_grid(puzzle["grid"]))
+    flowables.append(Spacer(1, 5 * mm))
+
+    palavras = puzzle["palavras"]
+    metade = (len(palavras) + 1) // 2
+    col1 = "   ".join(palavras[:metade])
+    col2 = "   ".join(palavras[metade:])
+    flowables.append(Paragraph("Encontre as palavras:", estilo_sub))
+    flowables.append(Spacer(1, 2 * mm))
+    flowables.append(Paragraph(col1, estilo_lista))
+    if col2:
+        flowables.append(Paragraph(col2, estilo_lista))
+    flowables.append(PageBreak())
+    return flowables
+
+
+def gerar_pdf_caca_palavras(apostila_id: int, produto_nome: str, tema: str, dificuldade: str, num_puzzles: int) -> str:
+    """Gera puzzles e PDF completo. Retorna caminho absoluto do PDF."""
+    puzzles = gerar_puzzles(tema, dificuldade, num_puzzles)
+
+    output_dir = Path(__file__).parent / "output" / "pdfs"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = output_dir / f"apostila_{apostila_id}.pdf"
+
+    estilo_capa_titulo = ParagraphStyle("cap_t", fontName=FB, fontSize=22, textColor=white,
+                                        alignment=TA_CENTER, leading=26)
+    estilo_capa_sub    = ParagraphStyle("cap_s", fontName=FR, fontSize=14, textColor=C_BLUE_LIGHT,
+                                        alignment=TA_CENTER, leading=18)
+    estilo_gab_label   = ParagraphStyle("gab",   fontName=FB, fontSize=9,  textColor=C_DARK,
+                                        alignment=TA_CENTER, leading=11)
+
+    doc = SimpleDocTemplate(
+        str(pdf_path),
+        pagesize=A4,
+        leftMargin=15 * mm, rightMargin=15 * mm,
+        topMargin=15 * mm,  bottomMargin=15 * mm,
+    )
+
+    flowables = []
+
+    # ── Capa ──────────────────────────────────────────
+    flowables.append(Spacer(1, 40 * mm))
+    tbl_capa = Table(
+        [[Paragraph(produto_nome, estilo_capa_titulo)]],
+        colWidths=[W - 30 * mm],
+    )
+    tbl_capa.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), C_BLUE),
+        ("TOPPADDING",    (0, 0), (-1, -1), 12),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 8 * mm),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 8 * mm),
+    ]))
+    flowables.append(tbl_capa)
+    flowables.append(Spacer(1, 8 * mm))
+    nivel_label = {"facil": "Fácil", "medio": "Médio", "dificil": "Difícil", "gigante": "Gigante"}.get(dificuldade, "")
+    tema_label  = tema.replace("_", " ").title()
+    flowables.append(Paragraph(f"{len(puzzles)} Puzzles · Nível {nivel_label} · Tema: {tema_label}", estilo_capa_sub))
+    flowables.append(Spacer(1, 6 * mm))
+    flowables.append(Paragraph("CogniVita — Estimulação Cognitiva para Idosos", estilo_capa_sub))
+    flowables.append(PageBreak())
+
+    # ── Puzzles ───────────────────────────────────────
+    for i, puzzle in enumerate(puzzles, start=1):
+        flowables.extend(_pagina_puzzle(puzzle, i, produto_nome, dificuldade))
+
+    # ── Gabaritos (4 por página) ──────────────────────
+    flowables.append(Paragraph("GABARITO", ParagraphStyle("gt", fontName=FB, fontSize=16,
+                                                           textColor=C_BLUE, alignment=TA_CENTER)))
+    flowables.append(Spacer(1, 4 * mm))
+
+    estilo_gab_label = ParagraphStyle("gab", fontName=FB, fontSize=9, textColor=C_DARK,
+                                      alignment=TA_CENTER, leading=11)
+    for i in range(0, len(puzzles), 4):
+        lote = puzzles[i:i + 4]
+        for j in range(0, len(lote), 2):
+            cel_a = [Paragraph(f"#{i+j+1}", estilo_gab_label),
+                     _renderizar_grid(lote[j]["grid"], lote[j]["gabarito"], escala=0.42)]
+            if j + 1 < len(lote):
+                cel_b = [Paragraph(f"#{i+j+2}", estilo_gab_label),
+                         _renderizar_grid(lote[j+1]["grid"], lote[j+1]["gabarito"], escala=0.42)]
+            else:
+                cel_b = [Paragraph("", estilo_gab_label), Spacer(1, 1)]
+            tbl_gab = Table([[cel_a, cel_b]], colWidths=[(W - 30 * mm) / 2] * 2)
+            tbl_gab.setStyle(TableStyle([
+                ("VALIGN",       (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING",  (0, 0), (-1, -1), 3),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            flowables.append(tbl_gab)
+            flowables.append(Spacer(1, 4 * mm))
+        flowables.append(PageBreak())
+
+    doc.build(flowables)
+    return str(pdf_path.resolve())
