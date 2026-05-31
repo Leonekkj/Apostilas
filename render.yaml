@@ -2,7 +2,7 @@ services:
   - type: web
     name: cognivita-apostilas
     runtime: python
-    buildCommand: pip install -r requirements.txt && (playwright install chromium || true)
+    buildCommand: pip install -r requirements.txt
     startCommand: python start.py
     # Disco persistente para PDFs e imagens geradas (~$1/mês, 1GB)
     disk:

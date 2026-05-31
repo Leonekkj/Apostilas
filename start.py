@@ -11,8 +11,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
+def _instalar_playwright():
+    """Instala o browser Chromium do Playwright se ainda não estiver disponível."""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            logger.info("Playwright Chromium instalado com sucesso")
+        else:
+            logger.warning(f"playwright install retornou {result.returncode}: {result.stderr[:200]}")
+    except Exception as e:
+        logger.warning(f"Falha ao instalar playwright: {e}")
+
+
 def main():
     port = os.getenv("PORT", "8000")
+
+    # Instala Chromium para geração de PDF (necessário no Render)
+    _instalar_playwright()
 
     # Inicia scheduler em background
     logger.info("Iniciando scheduler...")
