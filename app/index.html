@@ -1176,7 +1176,7 @@
       <div id="campos-caca-palavras" style="display:none;">
         <div class="form-group">
           <label class="form-label">Tema</label>
-          <select id="cp-tema" class="form-control" onchange="onCpDificuldadeChange()">
+          <select id="cp-tema" class="form-control">
             <option value="geral">Geral (para Idosos)</option>
             <option value="futebol">Futebol</option>
             <option value="culinaria">Culinária</option>
@@ -1187,23 +1187,42 @@
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Dificuldade</label>
-          <select id="cp-dificuldade" class="form-control" onchange="onCpDificuldadeChange()">
-            <option value="facil">Fácil — Grade 12×12, 8 palavras</option>
-            <option value="medio" selected>Médio — Grade 15×15, 12 palavras</option>
-            <option value="dificil">Difícil — Grade 18×18, 18 palavras</option>
-            <option value="gigante">Gigante — 300 puzzles</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Número de puzzles</label>
-          <input id="cp-num-puzzles" type="number" class="form-control" value="60" min="10" max="300">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Preço</label>
-          <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
-            <span id="cp-preco-label" style="font-size:13px;color:var(--muted);">Nível Médio</span>
-            <span id="cp-preco-valor" style="font-size:22px;font-weight:700;color:var(--primary);">R$ 17,90</span>
+          <label class="form-label">Volumes gerados automaticamente</label>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+            <table style="width:100%;font-size:13px;border-collapse:collapse;">
+              <thead><tr style="background:var(--primary);color:white;">
+                <th style="padding:8px 12px;text-align:left;font-weight:600;">Volume</th>
+                <th style="padding:8px 12px;text-align:left;font-weight:600;">Grade</th>
+                <th style="padding:8px 12px;text-align:left;font-weight:600;">Puzzles</th>
+                <th style="padding:8px 12px;text-align:right;font-weight:600;">Preço</th>
+              </tr></thead>
+              <tbody>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:8px 12px;">Fácil</td>
+                  <td style="padding:8px 12px;color:var(--muted);">12×12</td>
+                  <td style="padding:8px 12px;color:var(--muted);">60</td>
+                  <td style="padding:8px 12px;text-align:right;font-weight:600;color:var(--primary);">R$ 14,90</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:8px 12px;">Médio</td>
+                  <td style="padding:8px 12px;color:var(--muted);">15×15</td>
+                  <td style="padding:8px 12px;color:var(--muted);">60</td>
+                  <td style="padding:8px 12px;text-align:right;font-weight:600;color:var(--primary);">R$ 17,90</td>
+                </tr>
+                <tr style="border-bottom:1px solid var(--border);">
+                  <td style="padding:8px 12px;">Difícil</td>
+                  <td style="padding:8px 12px;color:var(--muted);">18×18</td>
+                  <td style="padding:8px 12px;color:var(--muted);">60</td>
+                  <td style="padding:8px 12px;text-align:right;font-weight:600;color:var(--primary);">R$ 19,90</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 12px;">Gigante</td>
+                  <td style="padding:8px 12px;color:var(--muted);">15×15</td>
+                  <td style="padding:8px 12px;color:var(--muted);">300</td>
+                  <td style="padding:8px 12px;text-align:right;font-weight:600;color:var(--primary);">R$ 34,90</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -1543,12 +1562,6 @@ function onTopicoChange() {
   if (isCp) onCpDificuldadeChange();
 }
 
-function onCpDificuldadeChange() {
-  const dif = document.getElementById('cp-dificuldade').value;
-  const preco = _PRECOS_CP[dif] || 17.90;
-  document.getElementById('cp-preco-label').textContent = `Nível ${_NIVEIS_CP[dif] || dif}`;
-  document.getElementById('cp-preco-valor').textContent = `R$ ${preco.toFixed(2).replace('.', ',')}`;
-}
 
 async function abrirModalLinhaProduto() {
   const sel = document.getElementById('linha-produto-topico');
@@ -1594,17 +1607,16 @@ async function gerarLinhaProduto() {
     let res, data;
 
     if (isCp) {
-      const tema       = document.getElementById('cp-tema').value;
-      const dificuldade = document.getElementById('cp-dificuldade').value;
-      const numPuzzles = parseInt(document.getElementById('cp-num-puzzles').value) || 60;
-      msg.textContent = 'Gerando puzzles e PDF. Aguarde…';
+      const tema = document.getElementById('cp-tema').value;
+      msg.textContent = 'Gerando 4 volumes (Fácil, Médio, Difícil, Gigante) com PDFs. Aguarde…';
       res = await apiFetch('/api/produto/caca-palavras', {
         method: 'POST',
-        body: JSON.stringify({ nome, topico_id: topicoId, tema, dificuldade, num_puzzles: numPuzzles }),
+        body: JSON.stringify({ nome, topico_id: topicoId, tema }),
       });
       data = await res.json();
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-      showToast(`Caça-Palavras "${nome}" criado! R$ ${data.preco?.toFixed(2).replace('.', ',')}`, 'success');
+      const n = data.volumes?.length || 4;
+      showToast(`${n} volumes de "${nome}" criados com sucesso!`, 'success');
     } else {
       const serie = parseInt(document.getElementById('linha-produto-serie').value) || 1;
       msg.textContent = 'Gerando 200 exercícios e 6 apostilas. Isso pode levar 4–6 minutos…';

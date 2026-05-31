@@ -201,8 +201,14 @@ class CacaPalavrasRequest(BaseModel):
     nome: str = Field(..., min_length=1, max_length=120)
     topico_id: int
     tema: str = Field(default="geral")
-    dificuldade: str = Field(default="medio")
-    num_puzzles: int = Field(default=60, ge=10, le=300)
+
+# Volumes fixos por dificuldade: (dificuldade, num_puzzles)
+_CP_VOLUMES = [
+    ("facil",   60),
+    ("medio",   60),
+    ("dificil", 60),
+    ("gigante", 300),
+]
 
 
 class KitRequest(BaseModel):
@@ -391,6 +397,7 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
 
 @app.post("/api/produto/caca-palavras")
 async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=Depends(_require_auth)):
+    """Cria 4 volumes (Fácil/Médio/Difícil/Gigante) de uma vez, com PDF e anúncio por volume."""
     from gerar_caca_palavras import gerar_pdf_caca_palavras
 
     topico = await asyncio.to_thread(database.buscar_topico_por_id, body.topico_id)
@@ -399,38 +406,45 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
     if topico.get("slug") != "caca-palavras":
         raise HTTPException(status_code=400, detail="Use o tópico de slug 'caca-palavras'")
 
+    volumes = []
     try:
-        produto_id = await asyncio.to_thread(
-            database.criar_produto_caca_palavras,
-            body.nome, body.topico_id, body.tema, body.dificuldade,
-        )
-        apostila_id = await asyncio.to_thread(
-            database.salvar_apostila, body.topico_id, body.num_puzzles, "{}", produto_id
-        )
-        pdf_path = await asyncio.to_thread(
-            gerar_pdf_caca_palavras,
-            apostila_id, body.nome, body.tema, body.dificuldade, body.num_puzzles,
-        )
-        await asyncio.to_thread(
-            database.salvar_conteudo_apostila, apostila_id, "{}", pdf_path
-        )
-        preco     = _PRECOS_CACA_PALAVRAS.get(body.dificuldade, 17.90)
-        titulo_ml = _titulo_caca_palavras(body.nome, body.tema, body.dificuldade, body.num_puzzles)
-        descricao = _descricao_caca_palavras(body.tema, body.dificuldade, body.num_puzzles)
-        anuncio_id = await asyncio.to_thread(
-            database.criar_anuncio,
-            apostila_id, "digital", 1, titulo_ml, preco, 1, "", None, descricao,
-        )
+        for dificuldade, num_puzzles in _CP_VOLUMES:
+            nivel_l   = _NIVEL_LABEL.get(dificuldade, dificuldade.title())
+            nome_vol  = f"{body.nome} — {nivel_l}"
+            preco     = _PRECOS_CACA_PALAVRAS.get(dificuldade, 17.90)
+            titulo_ml = _titulo_caca_palavras(nome_vol, body.tema, dificuldade, num_puzzles)
+            descricao = _descricao_caca_palavras(body.tema, dificuldade, num_puzzles)
+
+            produto_id = await asyncio.to_thread(
+                database.criar_produto_caca_palavras,
+                nome_vol, body.topico_id, body.tema, dificuldade,
+            )
+            apostila_id = await asyncio.to_thread(
+                database.salvar_apostila, body.topico_id, num_puzzles, "{}", produto_id
+            )
+            pdf_path = await asyncio.to_thread(
+                gerar_pdf_caca_palavras,
+                apostila_id, nome_vol, body.tema, dificuldade, num_puzzles,
+            )
+            await asyncio.to_thread(
+                database.salvar_conteudo_apostila, apostila_id, "{}", pdf_path
+            )
+            anuncio_id = await asyncio.to_thread(
+                database.criar_anuncio,
+                apostila_id, "digital", 1, titulo_ml, preco, 1, "", None, descricao,
+            )
+            volumes.append({
+                "dificuldade": dificuldade,
+                "produto_id":  produto_id,
+                "apostila_id": apostila_id,
+                "anuncio_id":  anuncio_id,
+                "preco":       preco,
+                "nome":        nome_vol,
+            })
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao criar caça-palavras: {exc}") from exc
 
-    return {
-        "produto_id": produto_id,
-        "apostila_id": apostila_id,
-        "anuncio_id": anuncio_id,
-        "pdf_path": pdf_path,
-        "preco": preco,
-    }
+    return {"tema": body.tema, "volumes": volumes}
 
 
 # ---------------------------------------------------------------------------
