@@ -345,7 +345,7 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
             body.nome, body.topico_id, body.tema, body.dificuldade,
         )
         apostila_id = await asyncio.to_thread(
-            database.salvar_apostila, body.topico_id, body.num_puzzles, "", produto_id
+            database.salvar_apostila, body.topico_id, body.num_puzzles, "{}", produto_id
         )
         pdf_path = await asyncio.to_thread(
             gerar_pdf_caca_palavras,
