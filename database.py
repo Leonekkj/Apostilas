@@ -367,7 +367,10 @@ def listar_topicos() -> list[dict]:
     """Retorna todos os tópicos ativos."""
     with _get_conn() as conn:
         cur = _cursor(conn)
-        cur.execute(f"SELECT * FROM topicos WHERE ativo = {PH} ORDER BY id", (1,))
+        if USE_POSTGRES:
+            cur.execute("SELECT * FROM topicos WHERE ativo = TRUE ORDER BY id")
+        else:
+            cur.execute("SELECT * FROM topicos WHERE ativo = 1 ORDER BY id")
         return _rows_to_dicts(cur.fetchall(), cur)
 
 
