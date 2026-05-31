@@ -409,6 +409,7 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
     volumes = []
     try:
         from gerar_caca_palavras import gerar_pdf_caca_palavras
+        from generator import images as gen_images
         for dificuldade, num_puzzles in _CP_VOLUMES:
             nivel_l   = _NIVEL_LABEL.get(dificuldade, dificuldade.title())
             nome_vol  = f"{body.nome} — {nivel_l}"
@@ -430,10 +431,24 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
             await asyncio.to_thread(
                 database.salvar_conteudo_apostila, apostila_id, "{}", pdf_path
             )
+
+            # Gera imagem de capa para o anúncio
+            topico_cp = {"id": body.topico_id, "nome": "Caça-Palavras", "slug": "caca-palavras"}
+            try:
+                imagem_paths = await asyncio.to_thread(
+                    gen_images.gerar_capas, apostila_id, topico_cp, num_puzzles, 1
+                )
+                imagem_path = imagem_paths[0] if imagem_paths else ""
+            except Exception:
+                imagem_path = ""
+
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,
                 apostila_id, "digital", 1, titulo_ml, preco, 1, "", None, descricao,
             )
+            if imagem_path:
+                await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, imagem_path=imagem_path)
+
             volumes.append({
                 "dificuldade": dificuldade,
                 "produto_id":  produto_id,

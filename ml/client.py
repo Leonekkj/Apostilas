@@ -19,8 +19,8 @@ ML_API_BASE = "https://api.mercadolibre.com"
 ML_PICTURES_ENDPOINT = f"{ML_API_BASE}/pictures"
 ML_ITEMS_ENDPOINT = f"{ML_API_BASE}/items"
 
-# MLB1196 = Livros e Revistas > Livros (Brasil)
-ML_CATEGORIA_ID = os.getenv("ML_CATEGORIA_ID", "MLB1196")
+# MLB455868 = Livros, Revistas e Comics > Ebooks (categoria folha, aceita digital)
+ML_CATEGORIA_ID = os.getenv("ML_CATEGORIA_ID", "MLB455868")
 
 # Pasta com imagens reais da marca CogniVita (jpg/jpeg/png, até 3 usadas por listing)
 _BRAND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "brand")
