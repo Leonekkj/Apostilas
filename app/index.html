@@ -1021,7 +1021,13 @@
     <div id="tab-anuncios" class="tab-panel">
       <div class="page-header">
         <h2 class="page-title">Anúncios</h2>
-        <button class="btn btn-primary" id="btn-importar" onclick="importarDoML()">↓ Importar do ML</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary" id="btn-importar" onclick="importarDoML()">↓ Importar do ML</button>
+          <button class="btn" id="btn-sync-precos" onclick="sincronizarPrecos(this)"
+            style="background:var(--surface);border:1px solid var(--border);color:var(--text);">
+            💲 Sincronizar Preços ML
+          </button>
+        </div>
       </div>
       <div class="page-content">
         <div class="filters-bar">
@@ -1962,6 +1968,22 @@ async function publicarAnuncio(id, btn) {
   } finally {
     btn.disabled = false;
     btn.innerHTML = 'Publicar';
+  }
+}
+
+async function sincronizarPrecos(btn) {
+  btn.disabled = true;
+  btn.textContent = 'Sincronizando…';
+  try {
+    const res = await apiFetch('/api/admin/anuncios/sincronizar-precos', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    showToast(`${data.atualizados} anúncio(s) com preços atualizados no ML${data.erros ? ` · ${data.erros} erro(s)` : ''}`, data.erros ? 'warning' : 'success');
+  } catch (e) {
+    showToast(`Erro: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💲 Sincronizar Preços ML';
   }
 }
 
