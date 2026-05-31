@@ -463,14 +463,18 @@ def listar_anuncios(
                 ap.topico_id,
                 ap.num_exercicios,
                 ap.pdf_path,
+                ap.produto_id,
                 ap.criado_em AS apostila_criado_em,
                 tp.nome AS topico_nome,
                 tp.slug AS topico_slug,
-                kt.nome AS kit_nome
+                kt.nome AS kit_nome,
+                pr.nome AS produto_nome,
+                pr.serie AS produto_serie
             FROM anuncios an
             LEFT JOIN apostilas ap ON an.apostila_id = ap.id
             LEFT JOIN topicos   tp ON ap.topico_id   = tp.id
             LEFT JOIN kits      kt ON an.kit_id       = kt.id
+            LEFT JOIN produtos  pr ON ap.produto_id   = pr.id
             WHERE 1=1
         """
         params: list = []

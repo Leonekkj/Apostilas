@@ -1656,65 +1656,111 @@ function filterAnuncios() {
   renderAnuncios(list);
 }
 
+// Estado de expansão dos grupos
+const _gruposExpandidos = {};
+
+function _renderAnuncioRow(a) {
+  const imgSrc = a.imagem_path ? `/${a.imagem_path}` : null;
+  const thumb = imgSrc
+    ? `<div class="td-thumb"><img src="${imgSrc}" alt="" onerror="this.parentElement.innerHTML='📋'"></div>`
+    : `<div class="td-thumb">📋</div>`;
+  const nomeProduto = a.topico_nome || a.kit_nome || `#${a.apostila_id || a.kit_id || '—'}`;
+  const apostilaOptions = [
+    `<option value="">— Não linkado —</option>`,
+    ..._todasApostilas.map(ap =>
+      `<option value="${ap.id}" ${ap.id === a.apostila_id ? 'selected' : ''}>
+        ${esc(ap.topico_nome)} ${ap.num_exercicios}ex
+      </option>`
+    )
+  ].join('');
+  const isUnlinked = !a.apostila_id;
+  const apostilaCell = `
+    <select class="apostila-select ${isUnlinked ? 'unlinked' : ''}"
+            onchange="linkApostila(${a.id}, this)">
+      ${apostilaOptions}
+    </select>`;
+  const precoVal = a.preco != null ? parseFloat(a.preco).toFixed(2) : null;
+  const preco = precoVal != null
+    ? `<span style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;" title="Clique para editar" onclick="editarPreco(${a.id}, this, ${precoVal})">R$ ${precoVal.replace('.', ',')}</span>`
+    : '—';
+  const badgeClass = {
+    rascunho: 'badge-rascunho',
+    publicado: 'badge-publicado',
+    erro: 'badge-erro',
+    pausado: 'badge-pausado',
+    deletado: 'badge-deletado',
+  }[a.status] || 'badge-rascunho';
+  const publishBtn = a.status !== 'publicado'
+    ? `<button class="btn btn-sm btn-primary" onclick="publicarAnuncio(${a.id}, this)">Publicar</button>`
+    : `<span style="color:var(--muted);font-size:12px;">—</span>`;
+  const mlLink = a.ml_id
+    ? `<a href="https://produto.mercadolivre.com.br/${a.ml_id}" target="_blank" class="btn btn-sm" style="font-size:11px;border:1px solid var(--border);background:transparent;">ML ↗</a>`
+    : '';
+  const deleteBtn = `<button class="btn btn-sm" style="color:var(--error,#c0392b);border:1px solid currentColor;background:transparent;padding:2px 8px;font-size:14px;line-height:1;" onclick="deletarAnuncio(${a.id}, this)" title="Excluir">×</button>`;
+  return `
+    <tr id="anuncio-row-${a.id}">
+      <td>${thumb}</td>
+      <td><div class="td-title" title="${esc(a.titulo || '')}">${esc(a.titulo || '—')}</div></td>
+      <td style="font-size:12px;color:var(--muted);">${esc(nomeProduto)}</td>
+      <td><span class="badge badge-angulo">${esc(a.angulo || '—')}</span></td>
+      <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px;">${a.variacao ?? '—'}</td>
+      <td class="price-mono">${preco}</td>
+      <td><span class="badge ${badgeClass}">${a.status || 'rascunho'}</span></td>
+      <td>${apostilaCell}</td>
+      <td style="white-space:nowrap;display:flex;gap:4px;align-items:center;">${publishBtn}${mlLink}${deleteBtn}</td>
+    </tr>`;
+}
+
+function toggleGrupo(grupoKey) {
+  _gruposExpandidos[grupoKey] = !_gruposExpandidos[grupoKey];
+  const rows = document.querySelectorAll(`[data-grupo="${CSS.escape(grupoKey)}"]`);
+  const btn = document.getElementById(`toggle-${CSS.escape(grupoKey)}`);
+  const expanded = _gruposExpandidos[grupoKey];
+  rows.forEach(r => r.style.display = expanded ? '' : 'none');
+  if (btn) btn.textContent = expanded ? '▾' : '▸';
+}
+
 function renderAnuncios(list) {
   const tbody = document.getElementById('anuncios-tbody');
   if (!list.length) {
     tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><p>Nenhum anúncio encontrado.</p></div></td></tr>`;
     return;
   }
-  tbody.innerHTML = list.map(a => {
-    const imgSrc = a.imagem_path ? `/${a.imagem_path}` : null;
-    const thumb = imgSrc
-      ? `<div class="td-thumb"><img src="${imgSrc}" alt="" onerror="this.parentElement.innerHTML='📋'"></div>`
-      : `<div class="td-thumb">📋</div>`;
-    const nomeProduto = a.topico_nome || a.kit_nome || `#${a.apostila_id || a.kit_id || '—'}`;
-    const apostilaOptions = [
-      `<option value="">— Não linkado —</option>`,
-      ..._todasApostilas.map(ap =>
-        `<option value="${ap.id}" ${ap.id === a.apostila_id ? 'selected' : ''}>
-          ${esc(ap.topico_nome)} ${ap.num_exercicios}ex
-        </option>`
-      )
-    ].join('');
-    const isUnlinked = !a.apostila_id;
-    const apostilaCell = `
-      <select class="apostila-select ${isUnlinked ? 'unlinked' : ''}"
-              onchange="linkApostila(${a.id}, this)">
-        ${apostilaOptions}
-      </select>`;
-    const precoVal = a.preco != null ? parseFloat(a.preco).toFixed(2) : null;
-    const preco = precoVal != null
-      ? `<span style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;" title="Clique para editar" onclick="editarPreco(${a.id}, this, ${precoVal})">R$ ${precoVal.replace('.', ',')}</span>`
-      : '—';
-    const badgeClass = {
-      rascunho: 'badge-rascunho',
-      publicado: 'badge-publicado',
-      erro: 'badge-erro',
-      pausado: 'badge-pausado',
-      deletado: 'badge-deletado',
-    }[a.status] || 'badge-rascunho';
 
-    const publishBtn = a.status !== 'publicado'
-      ? `<button class="btn btn-sm btn-primary" onclick="publicarAnuncio(${a.id}, this)">Publicar</button>`
-      : `<span style="color:var(--muted);font-size:12px;">—</span>`;
-    const mlLink = a.ml_id
-      ? `<a href="https://produto.mercadolivre.com.br/${a.ml_id}" target="_blank" class="btn btn-sm" style="font-size:11px;border:1px solid var(--border);background:transparent;">ML ↗</a>`
-      : '';
-    const deleteBtn = `<button class="btn btn-sm" style="color:var(--error,#c0392b);border:1px solid currentColor;background:transparent;padding:2px 8px;font-size:14px;line-height:1;" onclick="deletarAnuncio(${a.id}, this)" title="Excluir">×</button>`;
+  // Agrupa por produto/kit/não-linkado
+  const grupos = {};
+  for (const a of list) {
+    const key = a.produto_nome || a.kit_nome || (a.topico_nome ? a.topico_nome : null) || '— Não linkado —';
+    if (!grupos[key]) grupos[key] = [];
+    grupos[key].push(a);
+  }
 
-    return `
-      <tr id="anuncio-row-${a.id}">
-        <td>${thumb}</td>
-        <td><div class="td-title" title="${esc(a.titulo || '')}">${esc(a.titulo || '—')}</div></td>
-        <td style="font-size:12px;color:var(--muted);">${esc(nomeProduto)}</td>
-        <td><span class="badge badge-angulo">${esc(a.angulo || '—')}</span></td>
-        <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px;">${a.variacao ?? '—'}</td>
-        <td class="price-mono">${preco}</td>
-        <td><span class="badge ${badgeClass}">${a.status || 'rascunho'}</span></td>
-        <td>${apostilaCell}</td>
-        <td style="white-space:nowrap;display:flex;gap:4px;align-items:center;">${publishBtn}${mlLink}${deleteBtn}</td>
+  let html = '';
+  for (const [grupoKey, anuncios] of Object.entries(grupos)) {
+    // Inicializa expandido por padrão
+    if (_gruposExpandidos[grupoKey] === undefined) _gruposExpandidos[grupoKey] = true;
+    const expanded = _gruposExpandidos[grupoKey];
+    const pub = anuncios.filter(a => a.status === 'publicado').length;
+    const total = anuncios.length;
+
+    html += `
+      <tr style="background:var(--surface,#f5f5f0);border-top:2px solid var(--border);">
+        <td colspan="9" style="padding:8px 12px;">
+          <button id="toggle-${grupoKey}" onclick="toggleGrupo('${grupoKey.replace(/'/g,"\\'")}'))"
+            style="background:none;border:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--text);padding:0;display:flex;align-items:center;gap:6px;">
+            <span style="font-size:16px;">${expanded ? '▾' : '▸'}</span>
+            ${esc(grupoKey)}
+            <span style="font-weight:400;color:var(--muted);font-size:12px;">${pub} publicados · ${total} total</span>
+          </button>
+        </td>
       </tr>`;
-  }).join('');
+
+    for (const a of anuncios) {
+      const row = _renderAnuncioRow(a);
+      html += row.replace('<tr ', `<tr data-grupo="${grupoKey}" style="display:${expanded ? '' : 'none'}" `);
+    }
+  }
+  tbody.innerHTML = html;
 }
 
 async function publicarAnuncio(id, btn) {
