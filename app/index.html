@@ -1143,30 +1143,71 @@
       <button class="modal-close" onclick="closeModal('linha-produto-modal')">✕</button>
     </div>
     <div class="modal-body">
-      <p class="modal-info">Serão gerados 200 exercícios → 6 apostilas com preços individuais.</p>
+      <p class="modal-info" id="linha-produto-info">Serão gerados 200 exercícios → 6 apostilas com preços individuais.</p>
       <div class="form-group">
         <label class="form-label">Nome da linha</label>
         <input id="linha-produto-nome" type="text" class="form-control" placeholder="ex: Raciocínio Lógico Cognivita" maxlength="120">
       </div>
       <div class="form-group">
         <label class="form-label">Tópico</label>
-        <select id="linha-produto-topico" class="form-control"></select>
+        <select id="linha-produto-topico" class="form-control" onchange="onTopicoChange()"></select>
       </div>
-      <div class="form-group">
-        <label class="form-label">Série</label>
-        <input id="linha-produto-serie" type="number" class="form-control" value="1" min="1" max="99">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Preços (R$)</label>
-        <div class="preco-grid">
-          <label>30 ex<input id="preco-30"  type="number" class="form-control" value="39.99" min="0" step="0.10"></label>
-          <label>60 ex<input id="preco-60"  type="number" class="form-control" value="59.99" min="0" step="0.10"></label>
-          <label>90 ex<input id="preco-90"  type="number" class="form-control" value="79.99" min="0" step="0.10"></label>
-          <label>120 ex<input id="preco-120" type="number" class="form-control" value="99.99" min="0" step="0.10"></label>
-          <label>150 ex<input id="preco-150" type="number" class="form-control" value="119.99" min="0" step="0.10"></label>
-          <label>200 ex<input id="preco-200" type="number" class="form-control" value="139.99" min="0" step="0.10"></label>
+
+      <!-- Campos padrão (Cognitivo) -->
+      <div id="campos-cognitivo">
+        <div class="form-group">
+          <label class="form-label">Série</label>
+          <input id="linha-produto-serie" type="number" class="form-control" value="1" min="1" max="99">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Preços (R$)</label>
+          <div class="preco-grid">
+            <label>30 ex<input id="preco-30"  type="number" class="form-control" value="39.99" min="0" step="0.10"></label>
+            <label>60 ex<input id="preco-60"  type="number" class="form-control" value="59.99" min="0" step="0.10"></label>
+            <label>90 ex<input id="preco-90"  type="number" class="form-control" value="79.99" min="0" step="0.10"></label>
+            <label>120 ex<input id="preco-120" type="number" class="form-control" value="99.99" min="0" step="0.10"></label>
+            <label>150 ex<input id="preco-150" type="number" class="form-control" value="119.99" min="0" step="0.10"></label>
+            <label>200 ex<input id="preco-200" type="number" class="form-control" value="139.99" min="0" step="0.10"></label>
+          </div>
         </div>
       </div>
+
+      <!-- Campos Caça-Palavras -->
+      <div id="campos-caca-palavras" style="display:none;">
+        <div class="form-group">
+          <label class="form-label">Tema</label>
+          <select id="cp-tema" class="form-control" onchange="onCpDificuldadeChange()">
+            <option value="geral">Geral (para Idosos)</option>
+            <option value="futebol">Futebol</option>
+            <option value="culinaria">Culinária</option>
+            <option value="animais">Animais</option>
+            <option value="brasil">Brasil</option>
+            <option value="musica">Música</option>
+            <option value="natureza">Natureza</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Dificuldade</label>
+          <select id="cp-dificuldade" class="form-control" onchange="onCpDificuldadeChange()">
+            <option value="facil">Fácil — Grade 12×12, 8 palavras</option>
+            <option value="medio" selected>Médio — Grade 15×15, 12 palavras</option>
+            <option value="dificil">Difícil — Grade 18×18, 18 palavras</option>
+            <option value="gigante">Gigante — 300 puzzles</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Número de puzzles</label>
+          <input id="cp-num-puzzles" type="number" class="form-control" value="60" min="10" max="300">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Preço</label>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
+            <span id="cp-preco-label" style="font-size:13px;color:var(--muted);">Nível Médio</span>
+            <span id="cp-preco-valor" style="font-size:22px;font-weight:700;color:var(--primary);">R$ 17,90</span>
+          </div>
+        </div>
+      </div>
+
       <div id="linha-produto-msg" style="font-size:13px;color:var(--muted);margin-top:-8px;"></div>
     </div>
     <div class="modal-footer">
@@ -1486,6 +1527,29 @@ async function loadTopicos() {
 // ─────────────────────────────────────────────
 // Linha de Produto (200 exercícios → 6 apostilas)
 // ─────────────────────────────────────────────
+const _PRECOS_CP = { facil: 14.90, medio: 17.90, dificil: 19.90, gigante: 34.90 };
+const _NIVEIS_CP = { facil: 'Fácil', medio: 'Médio', dificil: 'Difícil', gigante: 'Gigante' };
+
+function onTopicoChange() {
+  const sel = document.getElementById('linha-produto-topico');
+  const opt = sel.options[sel.selectedIndex];
+  const isCp = opt && opt.text.toLowerCase().includes('caça');
+  document.getElementById('campos-cognitivo').style.display  = isCp ? 'none' : '';
+  document.getElementById('campos-caca-palavras').style.display = isCp ? '' : 'none';
+  document.getElementById('linha-produto-info').textContent = isCp
+    ? 'Será gerado 1 volume de caça-palavras com PDF automático.'
+    : 'Serão gerados 200 exercícios → 6 apostilas com preços individuais.';
+  document.getElementById('btn-gerar-linha').textContent = isCp ? 'Gerar Caça-Palavras' : 'Gerar Linha';
+  if (isCp) onCpDificuldadeChange();
+}
+
+function onCpDificuldadeChange() {
+  const dif = document.getElementById('cp-dificuldade').value;
+  const preco = _PRECOS_CP[dif] || 17.90;
+  document.getElementById('cp-preco-label').textContent = `Nível ${_NIVEIS_CP[dif] || dif}`;
+  document.getElementById('cp-preco-valor').textContent = `R$ ${preco.toFixed(2).replace('.', ',')}`;
+}
+
 async function abrirModalLinhaProduto() {
   const sel = document.getElementById('linha-produto-topico');
   if (_topicos.length) {
@@ -1508,37 +1572,56 @@ async function abrirModalLinhaProduto() {
   document.getElementById('linha-produto-msg').textContent = '';
   document.getElementById('btn-gerar-linha').disabled = false;
   document.getElementById('btn-gerar-linha').innerHTML = 'Gerar Linha';
+  onTopicoChange();
   openModal('linha-produto-modal');
 }
 
 async function gerarLinhaProduto() {
   const nome     = document.getElementById('linha-produto-nome').value.trim();
   const topicoId = parseInt(document.getElementById('linha-produto-topico').value);
-  const serie    = parseInt(document.getElementById('linha-produto-serie').value) || 1;
   const msg      = document.getElementById('linha-produto-msg');
   const btn      = document.getElementById('btn-gerar-linha');
+  const sel      = document.getElementById('linha-produto-topico');
+  const isCp     = sel.options[sel.selectedIndex]?.text.toLowerCase().includes('caça');
 
-  if (!nome)     { showToast('Informe o nome da linha', 'error'); return; }
+  if (!nome)     { showToast('Informe o nome', 'error'); return; }
   if (!topicoId) { showToast('Selecione um tópico', 'error'); return; }
 
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Gerando…';
-  msg.textContent = 'Gerando 200 exercícios e 6 apostilas. Isso pode levar 4–6 minutos…';
 
   try {
-    const precos = {};
-    [30, 60, 90, 120, 150, 200].forEach(n => {
-      const v = parseFloat(document.getElementById(`preco-${n}`)?.value);
-      precos[n] = isNaN(v) ? undefined : v;
-    });
-    const res = await apiFetch('/api/produto', {
-      method: 'POST',
-      body: JSON.stringify({ nome, topico_id: topicoId, serie, precos }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    let res, data;
 
-    showToast(`Linha "${data.nome}" criada com ${data.apostilas?.length || 0} apostilas!`, 'success');
+    if (isCp) {
+      const tema       = document.getElementById('cp-tema').value;
+      const dificuldade = document.getElementById('cp-dificuldade').value;
+      const numPuzzles = parseInt(document.getElementById('cp-num-puzzles').value) || 60;
+      msg.textContent = 'Gerando puzzles e PDF. Aguarde…';
+      res = await apiFetch('/api/produto/caca-palavras', {
+        method: 'POST',
+        body: JSON.stringify({ nome, topico_id: topicoId, tema, dificuldade, num_puzzles: numPuzzles }),
+      });
+      data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      showToast(`Caça-Palavras "${nome}" criado! R$ ${data.preco?.toFixed(2).replace('.', ',')}`, 'success');
+    } else {
+      const serie = parseInt(document.getElementById('linha-produto-serie').value) || 1;
+      msg.textContent = 'Gerando 200 exercícios e 6 apostilas. Isso pode levar 4–6 minutos…';
+      const precos = {};
+      [30, 60, 90, 120, 150, 200].forEach(n => {
+        const v = parseFloat(document.getElementById(`preco-${n}`)?.value);
+        precos[n] = isNaN(v) ? undefined : v;
+      });
+      res = await apiFetch('/api/produto', {
+        method: 'POST',
+        body: JSON.stringify({ nome, topico_id: topicoId, serie, precos }),
+      });
+      data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      showToast(`Linha "${data.nome}" criada com ${data.apostilas?.length || 0} apostilas!`, 'success');
+    }
+
     closeModal('linha-produto-modal');
     await loadProdutos();
     await loadStats();
