@@ -194,10 +194,12 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
         "listing_type_id": "gold_pro",
         "condition": "new",
         "attributes": [
-            {"id": "TITLE",     "value_name": titulo[:60]},
-            {"id": "PUBLISHER", "value_name": "CogniVita"},
-            {"id": "BRAND",     "value_name": "CogniVita"},
-            {"id": "FORMAT",    "value_name": "Digital" if is_digital else "Físico"},
+            {"id": "TITLE",        "value_name": titulo[:60]},
+            {"id": "PUBLISHER",    "value_name": "CogniVita"},
+            {"id": "BRAND",        "value_name": "CogniVita"},
+            {"id": "FORMAT",       "value_name": "Digital" if is_digital else "Físico"},
+            {"id": "EBOOK_TITLE",  "value_name": titulo[:60]},
+            {"id": "EBOOK_AUTHOR", "value_name": "CogniVita"},
         ],
     }
 
