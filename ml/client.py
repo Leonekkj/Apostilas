@@ -308,6 +308,55 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     return data.get("id")
 
 
+def fix_categorias_ml() -> dict:
+    """
+    Itera todos os anúncios publicados no banco e atualiza a category_id no ML
+    para a categoria correta (físico → MLB437616, digital → MLB1227).
+
+    Returns:
+        dict com listas 'atualizados', 'erros', 'sem_ml_id'.
+    """
+    token = auth.get_valid_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    anuncios = database.listar_anuncios(status="publicado", limite=9999)
+    atualizados = []
+    erros = []
+    sem_ml_id = []
+
+    for an in anuncios:
+        ml_id = an.get("ml_id")
+        if not ml_id:
+            sem_ml_id.append(an.get("id"))
+            continue
+
+        is_digital = an.get("tipo", "fisico") == "digital"
+        categoria_correta = ML_CATEGORIA_DIGITAL_ID if is_digital else ML_CATEGORIA_FISICO_ID
+
+        r = requests.put(
+            f"{ML_ITEMS_ENDPOINT}/{ml_id}",
+            json={"category_id": categoria_correta},
+            headers=headers,
+            timeout=15,
+        )
+        if r.status_code == 200:
+            atualizados.append({"anuncio_id": an["id"], "ml_id": ml_id, "categoria": categoria_correta})
+            print(f"[ML fix-cat] OK {ml_id} → {categoria_correta}")
+        else:
+            erros.append({"anuncio_id": an["id"], "ml_id": ml_id, "status": r.status_code, "detail": r.text[:300]})
+            print(f"[ML fix-cat] ERRO {ml_id}: {r.status_code} {r.text[:200]}")
+
+    return {
+        "atualizados": len(atualizados),
+        "erros": len(erros),
+        "sem_ml_id": len(sem_ml_id),
+        "detalhes_erros": erros,
+    }
+
+
 def importar_anuncios_ml() -> list[dict]:
     """
     Busca todos os anúncios ativos do vendedor no ML e importa para o banco.

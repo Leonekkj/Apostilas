@@ -916,6 +916,17 @@ async def importar_do_ml(_auth=Depends(_require_auth)):
         raise HTTPException(status_code=503, detail=str(e))
 
 
+@app.post("/api/admin/ml/fix-categorias")
+async def fix_categorias_ml(_auth=Depends(_require_auth)):
+    """Atualiza a categoria de todos os anúncios publicados no ML para a categoria correta
+    (físico → MLB437616 Livros Físicos, digital → MLB1227 Outros/Livros)."""
+    try:
+        resultado = await asyncio.to_thread(ml_client.fix_categorias_ml)
+        return resultado
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
 @app.get("/api/ml/status")
 async def ml_status():
     tokens = await asyncio.to_thread(database.buscar_ml_tokens)
