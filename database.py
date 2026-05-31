@@ -180,6 +180,15 @@ def criar_tabelas() -> None:
             )
             """,
             """
+            CREATE TABLE IF NOT EXISTS shopee_tokens (
+                id            INTEGER PRIMARY KEY DEFAULT 1,
+                access_token  TEXT,
+                refresh_token TEXT,
+                expires_at    TEXT,
+                shop_id       INTEGER
+            )
+            """,
+            """
             CREATE TABLE IF NOT EXISTS kits (
                 id           {serial} PRIMARY KEY,
                 nome         TEXT NOT NULL,
@@ -238,10 +247,12 @@ def criar_tabelas() -> None:
 
         # Tabela: anuncios
         _add_columns(cur, conn, "anuncios", [
-            ("variacao",  "INTEGER DEFAULT 1"),
-            ("angulo",    "TEXT DEFAULT ''"),
-            ("kit_id",    "INTEGER"),
-            ("descricao", "TEXT DEFAULT ''"),
+            ("variacao",      "INTEGER DEFAULT 1"),
+            ("angulo",        "TEXT DEFAULT ''"),
+            ("kit_id",        "INTEGER"),
+            ("descricao",     "TEXT DEFAULT ''"),
+            ("shopee_item_id","TEXT"),
+            ("shopee_status", "TEXT DEFAULT 'nao_publicado'"),
         ])
 
         # Tabela: apostilas
@@ -518,6 +529,7 @@ def atualizar_anuncio(anuncio_id: int, **kwargs) -> None:
         "status", "ml_id", "imagem_path", "erro_msg",
         "publicado_em", "titulo", "preco", "template_id",
         "variacao", "angulo", "kit_id", "apostila_id",
+        "shopee_item_id", "shopee_status",
     }
     campos = {k: v for k, v in kwargs.items() if k in campos_permitidos}
     if not campos:
@@ -751,6 +763,44 @@ def buscar_ml_tokens() -> Optional[dict]:
     with _get_conn() as conn:
         cur = _cursor(conn)
         cur.execute("SELECT * FROM ml_tokens WHERE id = 1")
+        row = cur.fetchone()
+        return _row_to_dict(row, cur)
+
+
+def salvar_shopee_tokens(access_token: str, refresh_token: str, expires_at: str, shop_id: int) -> None:
+    """Upsert dos tokens da Shopee (sempre id=1)."""
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        if USE_POSTGRES:
+            cur.execute(
+                """INSERT INTO shopee_tokens (id, access_token, refresh_token, expires_at, shop_id)
+                   VALUES (1, %s, %s, %s, %s)
+                   ON CONFLICT(id) DO UPDATE SET
+                       access_token  = EXCLUDED.access_token,
+                       refresh_token = EXCLUDED.refresh_token,
+                       expires_at    = EXCLUDED.expires_at,
+                       shop_id       = EXCLUDED.shop_id""",
+                (access_token, refresh_token, expires_at, shop_id),
+            )
+        else:
+            cur.execute(
+                """INSERT INTO shopee_tokens (id, access_token, refresh_token, expires_at, shop_id)
+                   VALUES (1, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET
+                       access_token  = excluded.access_token,
+                       refresh_token = excluded.refresh_token,
+                       expires_at    = excluded.expires_at,
+                       shop_id       = excluded.shop_id""",
+                (access_token, refresh_token, expires_at, shop_id),
+            )
+        conn.commit()
+
+
+def buscar_shopee_tokens() -> Optional[dict]:
+    """Retorna os tokens da Shopee ou None."""
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        cur.execute("SELECT * FROM shopee_tokens WHERE id = 1")
         row = cur.fetchone()
         return _row_to_dict(row, cur)
 

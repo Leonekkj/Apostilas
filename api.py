@@ -737,6 +737,40 @@ async def ml_callback(code: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/api/shopee/status")
+async def shopee_status():
+    tokens = await asyncio.to_thread(database.buscar_shopee_tokens)
+    if tokens and tokens.get("access_token"):
+        return {"conectado": True, "expires_at": tokens.get("expires_at"), "shop_id": tokens.get("shop_id")}
+    return {"conectado": False, "message": "Shopee não conectada"}
+
+
+@app.get("/api/shopee/auth")
+async def shopee_auth():
+    if not os.getenv("SHOPEE_PARTNER_ID"):
+        raise HTTPException(status_code=503, detail="SHOPEE_PARTNER_ID não configurado no servidor")
+    from shopee import auth as shopee_auth_module
+    url = shopee_auth_module.get_auth_url()
+    return {"auth_url": url}
+
+
+@app.get("/api/shopee/callback")
+async def shopee_callback(code: str, shop_id: int):
+    try:
+        from shopee import auth as shopee_auth_module
+        from datetime import datetime, timedelta
+        from fastapi.responses import RedirectResponse
+        tokens = await asyncio.to_thread(shopee_auth_module.exchange_code, code, shop_id)
+        expires_at = (datetime.utcnow() + timedelta(seconds=tokens["expires_in"])).isoformat()
+        await asyncio.to_thread(
+            database.salvar_shopee_tokens,
+            tokens["access_token"], tokens["refresh_token"], expires_at, shop_id,
+        )
+        return RedirectResponse(url="/?shopee=conectado")
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/api/ml/listing-types")
 async def ml_listing_types():
     """Retorna os tipos de anúncio disponíveis para o vendedor na categoria configurada."""
