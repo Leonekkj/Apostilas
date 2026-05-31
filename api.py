@@ -126,6 +126,17 @@ _TEMAS_LABEL = {
     "natureza":  "de Natureza",
 }
 
+# Rótulo compacto (sem preposição) para uso no título ML de 60 chars
+_TEMAS_CURTO = {
+    "geral":     "",
+    "futebol":   "Futebol",
+    "culinaria": "Culinária",
+    "animais":   "Animais",
+    "brasil":    "Brasil",
+    "musica":    "Música",
+    "natureza":  "Natureza",
+}
+
 _NIVEL_LABEL = {
     "facil":   "Fácil",
     "medio":   "Médio",
@@ -135,40 +146,89 @@ _NIVEL_LABEL = {
 
 
 def _titulo_caca_palavras(nome: str, tema: str, dificuldade: str, num_puzzles: int) -> str:
-    tema_l  = _TEMAS_LABEL.get(tema, tema.title())
+    """Gera título ≤60 chars garantindo que 'PDF' sempre apareça completo."""
     nivel_l = _NIVEL_LABEL.get(dificuldade, dificuldade.title())
-    titulo = f"Caça-Palavras {tema_l} para Idosos — {num_puzzles} Puzzles Nível {nivel_l} | PDF Digital"
-    return titulo[:120]
+    tema_c  = _TEMAS_CURTO.get(tema, tema.title())
+
+    if tema_c:
+        # Ex: "Caça-Palavras Futebol 60 Puzzles Nível Difícil PDF" = 50 chars
+        titulo = f"Caça-Palavras {tema_c} {num_puzzles} Puzzles Nível {nivel_l} PDF"
+    else:
+        # Ex: "Caça-Palavras 300 Puzzles Nível Gigante Idosos PDF" = 50 chars
+        titulo = f"Caça-Palavras {num_puzzles} Puzzles Nível {nivel_l} Idosos PDF"
+
+    # Segurança: truncar na última palavra sem cortar PDF
+    if len(titulo) > 60:
+        titulo = titulo[:60].rsplit(" ", 1)[0]
+        if "PDF" not in titulo:
+            titulo = (titulo[:55].rsplit(" ", 1)[0] + " PDF")[:60]
+
+    return titulo
 
 
 def _descricao_caca_palavras(tema: str, dificuldade: str, num_puzzles: int) -> str:
     tema_l  = _TEMAS_LABEL.get(tema, tema.title())
     nivel_l = _NIVEL_LABEL.get(dificuldade, dificuldade.title())
-    linhas = [
-        f"✅ {num_puzzles} caça-palavras {tema_l} — Nível {nivel_l}",
-        "✅ Gabarito completo incluído no final",
-        "✅ PDF digital — receba na hora e imprima em casa",
-        "✅ Letra grande e grade espaçada — ideal para idosos 60+",
-        "✅ Excelente para estimulação cognitiva e passatempo",
-        "",
-        "📦 COMO FUNCIONA:",
-        "Após a compra você recebe o link para download do PDF. Imprima quantas vezes quiser.",
-        "",
-        "📐 DIFICULDADE:",
-    ]
-    desc_dif = {
-        "facil":   "Grade 12×12 · 8 palavras por puzzle · Direções horizontal e vertical",
-        "medio":   "Grade 15×15 · 12 palavras por puzzle · Inclui diagonal",
-        "dificil": "Grade 18×18 · 18 palavras por puzzle · Todas as direções incluindo reverso",
-        "gigante": f"300 puzzles em nível médio — o maior volume disponível",
+
+    _spec = {
+        "facil": (
+            "Grade 12×12 · 8 palavras por puzzle",
+            "Direções horizontal e vertical — ideal para iniciantes",
+            "Perfeito para quem está começando ou prefere um ritmo mais tranquilo.",
+        ),
+        "medio": (
+            "Grade 15×15 · 12 palavras por puzzle",
+            "Direções horizontal, vertical e diagonal",
+            "Equilibra desafio e prazer — o nível mais procurado.",
+        ),
+        "dificil": (
+            "Grade 18×18 · 18 palavras por puzzle",
+            "Todas as direções incluindo reverso",
+            "Máximo de estimulação — para quem quer um desafio real.",
+        ),
+        "gigante": (
+            f"{num_puzzles} puzzles em nível médio",
+            "O maior volume disponível — meses de atividade garantidos",
+            "Ideal para clínicas, cuidadores e quem usa diariamente.",
+        ),
     }
-    linhas.append(desc_dif.get(dificuldade, ""))
-    linhas += [
+    grade, direcoes, frase_dif = _spec.get(dificuldade, ("", "", ""))
+
+    return "\n".join([
+        f"CAÇA-PALAVRAS {tema_l.upper()} — PDF DIGITAL PARA IDOSOS",
+        "",
+        f"Coleção com {num_puzzles} caça-palavras {tema_l}, nível {nivel_l}. "
+        f"{frase_dif} "
+        "Letra grande, grade espaçada e gabarito completo incluído — tudo pensado para idosos 60+.",
+        "",
+        "O QUE VOCÊ RECEBE",
+        f"• {num_puzzles} caça-palavras {tema_l} em PDF",
+        f"• Nível {nivel_l}: {grade}",
+        f"• {direcoes}",
+        "• Gabarito completo no final do arquivo",
+        "• Fonte ampliada — ideal para leitura confortável",
+        "",
+        "COMO FUNCIONA",
+        "• Compre e receba o PDF na hora por mensagem no Mercado Livre",
+        "• Imprima em casa (A4, preto e branco) quantas vezes quiser",
+        "• Comece a usar no mesmo dia — sem esperar entrega",
+        "",
+        "BENEFÍCIOS",
+        "• Estimula memória, atenção e raciocínio de forma lúdica",
+        "• Atividade comprovada para manutenção da saúde cognitiva",
+        "• Passatempo saudável e prazeroso para a terceira idade",
+        "• Gabarito incluso para autonomia e autoconfiança",
+        "",
+        "ESPECIFICAÇÕES",
+        "• Formato: PDF Digital",
+        f"• Quantidade: {num_puzzles} puzzles",
+        f"• Nível: {nivel_l} ({grade})",
+        "• Páginas: A4 — Impressão recomendada: Preto e Branco",
+        "• Fonte ampliada (ideal para idosos 60+)",
         "",
         "🧠 CogniVita — Especialistas em Estimulação Cognitiva para Idosos",
         "cognivita.com.br",
-    ]
-    return "\n".join(linhas)
+    ])
 
 
 def _get_preco(num_exercicios: int) -> float:
@@ -442,7 +502,8 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
                 # Sem variacao= gera v1, v2 e v3; retorna v1 para imagem_path
                 paths = await asyncio.to_thread(gen_images.gerar_capas, apostila_id, topico_cp, num_puzzles)
                 return paths[0] if paths else ""
-            except Exception:
+            except Exception as _img_err:
+                print(f"[WARN caca-palavras] falha ao gerar imagem apostila_id={apostila_id}: {_img_err}")
                 return ""
 
         imagens = await asyncio.gather(*[

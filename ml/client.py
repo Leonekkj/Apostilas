@@ -69,7 +69,37 @@ def publicar_anuncio(anuncio_id: int) -> str:
 
     try:
         # 3. Upload até 3 imagens (variação principal + 2 adjacentes)
-        picture_ids = _upload_pictures(token, anuncio.get("imagem_path", ""))
+        imagem_path = anuncio.get("imagem_path") or ""
+        print(f"[ML] publicar_anuncio #{anuncio_id}: imagem_path={imagem_path!r}")
+
+        # Se não tiver imagem ainda, gera on-demand (igual ao fluxo de criação)
+        if not imagem_path and anuncio.get("apostila_id"):
+            try:
+                from generator import images as _gen_images
+                topico_dict = {
+                    "id":   anuncio.get("topico_id"),
+                    "nome": anuncio.get("topico_nome", ""),
+                    "slug": anuncio.get("topico_slug", "geral"),
+                }
+                num_ex = anuncio.get("num_exercicios") or 60
+                print(f"[ML] gerando imagem on-demand: topico={topico_dict['slug']} num_ex={num_ex}")
+                paths = _gen_images.gerar_capas(anuncio["apostila_id"], topico_dict, num_ex)
+                if paths:
+                    imagem_path = paths[0]
+                    database.atualizar_anuncio(anuncio_id, imagem_path=imagem_path)
+                    print(f"[ML] imagem gerada: {imagem_path}")
+                else:
+                    print("[ML] gerar_capas retornou lista vazia")
+            except Exception as _e:
+                print(f"[ML] falha ao gerar imagem on-demand: {_e}")
+
+        picture_ids = _upload_pictures(token, imagem_path)
+        if not picture_ids:
+            raise RuntimeError(
+                "Nenhuma imagem disponível para upload. "
+                "Verifique se a geração de capa está funcionando ou adicione imagens em assets/brand/."
+            )
+        print(f"[ML] publicar_anuncio #{anuncio_id}: {len(picture_ids)} imagem(ns) enviada(s)")
 
         # 4. Create listing on ML
         ml_id = _create_listing(token, anuncio, picture_ids)
@@ -114,13 +144,22 @@ def publicar_anuncio(anuncio_id: int) -> str:
 
 def _upload_single(token: str, imagem_path: str) -> Optional[str]:
     """Faz upload de uma imagem e retorna o picture_id, ou None se falhar."""
-    if not imagem_path or not os.path.exists(imagem_path):
+    if not imagem_path:
+        print("[ML] _upload_single: imagem_path é None/vazio")
         return None
+    if not os.path.exists(imagem_path):
+        print(f"[ML] _upload_single: arquivo não existe → {imagem_path}")
+        return None
+    size = os.path.getsize(imagem_path)
+    print(f"[ML] _upload_single: enviando {imagem_path} ({size} bytes)")
     with open(imagem_path, "rb") as f:
         response = requests.post(ML_PICTURES_ENDPOINT, files={"file": f}, params={"access_token": token})
     if response.status_code not in (200, 201):
+        print(f"[ML] _upload_single: falhou {response.status_code} → {response.text[:300]}")
         return None
-    return response.json().get("id")
+    pid = response.json().get("id")
+    print(f"[ML] _upload_single: OK picture_id={pid}")
+    return pid
 
 
 def _upload_pictures(token: str, imagem_path: str) -> list[str]:
@@ -165,6 +204,19 @@ def _upload_pictures(token: str, imagem_path: str) -> list[str]:
     return ids
 
 
+def _fit_titulo(titulo: str, limit: int = 60) -> str:
+    """Trunca no limite de palavras completas, garantindo que 'PDF' apareça quando cabe."""
+    if len(titulo) <= limit:
+        return titulo
+    truncado = titulo[:limit].rsplit(" ", 1)[0].rstrip(" —|·")
+    # Se PDF estava no original mas caiu fora, adiciona compacto
+    if "PDF" in titulo and "PDF" not in truncado:
+        candidato = truncado[:limit - 4].rsplit(" ", 1)[0] + " PDF"
+        if len(candidato) <= limit:
+            return candidato
+    return truncado
+
+
 def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     """
     Creates a listing on Mercado Livre.
@@ -180,7 +232,7 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     Raises:
         RuntimeError: Se falhar ao criar listing.
     """
-    titulo = anuncio.get("titulo", "Apostila Cognitiva")[:60]
+    titulo = _fit_titulo(anuncio.get("titulo", "Apostila Cognitiva"))
     is_digital = anuncio.get("tipo", "fisico") == "digital"
 
     # Build item payload
@@ -204,14 +256,17 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     }
 
     if is_digital:
-        # Produto digital: sem envio físico
         payload["shipping"] = {
             "mode": "not_specified",
-            "free_shipping": False,
+            "free_shipping": True,
             "local_pick_up": False,
         }
     else:
-        payload["shipping"] = {"free_shipping": True}
+        payload["shipping"] = {
+            "mode": "me2",
+            "free_shipping": True,
+            "local_pick_up": False,
+        }
 
     # Até 3 imagens
     if picture_ids:
