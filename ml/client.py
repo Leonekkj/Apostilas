@@ -19,8 +19,8 @@ ML_API_BASE = "https://api.mercadolibre.com"
 ML_PICTURES_ENDPOINT = f"{ML_API_BASE}/pictures"
 ML_ITEMS_ENDPOINT = f"{ML_API_BASE}/items"
 
-# MLB455868 = Livros, Revistas e Comics > Ebooks (categoria folha, aceita digital)
-ML_CATEGORIA_ID = os.getenv("ML_CATEGORIA_ID", "MLB455868")
+# MLB445795 = Cursos Completos (digital educacional — menos sujeito a bloqueios de PI)
+ML_CATEGORIA_ID = os.getenv("ML_CATEGORIA_ID", "MLB445795")
 
 # Pasta com imagens reais da marca CogniVita (jpg/jpeg/png, até 3 usadas por listing)
 _BRAND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "brand")
@@ -246,12 +246,11 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
         "listing_type_id": "gold_pro",
         "condition": "new",
         "attributes": [
-            {"id": "TITLE",        "value_name": titulo[:60]},
-            {"id": "PUBLISHER",    "value_name": "CogniVita"},
-            {"id": "BRAND",        "value_name": "CogniVita"},
-            {"id": "FORMAT",       "value_name": "Digital" if is_digital else "Físico"},
-            {"id": "EBOOK_TITLE",  "value_name": titulo[:60]},
-            {"id": "EBOOK_AUTHOR", "value_name": "CogniVita"},
+            {"id": "COURSE_TITLE",  "value_name": titulo},
+            {"id": "COURSE_FORMAT", "value_name": "Digital" if is_digital else "Online"},
+            {"id": "BRAND",         "value_name": "CogniVita"},
+            {"id": "AUTHOR",        "value_name": "CogniVita"},
+            {"id": "LANGUAGE",      "value_name": "Português"},
         ],
     }
 
