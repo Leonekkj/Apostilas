@@ -355,6 +355,17 @@ def pausar_anuncio(anuncio_id: int) -> None:
     database.atualizar_anuncio(anuncio_id, status="pausado")
 
 
+def atualizar_preco_ml(ml_id: str, novo_preco: float) -> None:
+    """Atualiza o preço de um anúncio publicado no ML."""
+    token = auth.get_valid_token()
+    endpoint = f"{ML_ITEMS_ENDPOINT}/{ml_id}"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    response = requests.put(endpoint, json={"price": novo_preco}, headers=headers)
+    if response.status_code != 200:
+        error_msg = response.json().get("message", response.text)
+        raise RuntimeError(f"ML API error {response.status_code}: {error_msg}")
+
+
 def fechar_anuncio_ml(ml_id: str) -> bool:
     """Closes an ML listing permanently. Returns True on success, False on failure (non-blocking)."""
     if not ml_id:

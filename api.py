@@ -105,7 +105,7 @@ def _require_auth(
 # ---------------------------------------------------------------------------
 
 _FATIAS = [30, 60, 90, 120, 150, 200]
-_PRECOS_PRODUTO = {30: 14.90, 60: 19.90, 90: 24.90, 120: 29.90, 150: 34.90, 200: 44.90}
+_PRECOS_PRODUTO = {30: 69.90, 60: 79.90, 90: 89.90, 120: 99.90, 150: 109.90, 200: 119.90}
 _PRECOS_CACA_PALAVRAS = {
     "facil":   14.90,
     "medio":   17.90,
@@ -169,7 +169,7 @@ def _descricao_caca_palavras(tema: str, dificuldade: str, num_puzzles: int) -> s
 
 
 def _get_preco(num_exercicios: int) -> float:
-    defaults = {30: 14.90, 60: 29.90, 90: 34.90, 120: 39.90, 150: 44.90, 200: 44.90}
+    defaults = {30: 69.90, 60: 79.90, 90: 89.90, 120: 99.90, 150: 109.90, 200: 119.90}
     env_key = f"PRECO_{num_exercicios}"
     raw = os.getenv(env_key)
     if raw:
@@ -1061,6 +1061,36 @@ async def ml_webhook(request: Request):
     # e processa a entrega em background
     asyncio.create_task(asyncio.to_thread(_processar))
     return {"status": "received"}
+
+
+@app.post("/api/admin/anuncios/atualizar-precos-cognitivo")
+async def atualizar_precos_cognitivo(_auth=Depends(_require_auth)):
+    """Aplica a nova tabela de preços em todos os anúncios cognitivos publicados no ML."""
+    from ml import client as ml_client
+
+    novos_precos = _PRECOS_PRODUTO  # {30: 69.90, 60: 79.90, ...}
+
+    anuncios = await asyncio.to_thread(database.listar_anuncios, status="publicado")
+    cognitivos = [a for a in anuncios if a.get("topico_slug") != "caca-palavras" and a.get("ml_id")]
+
+    atualizados, erros = 0, []
+    for a in cognitivos:
+        num_ex = a.get("num_exercicios")
+        novo_preco = novos_precos.get(num_ex)
+        if not novo_preco:
+            continue
+        try:
+            await asyncio.to_thread(ml_client.atualizar_preco_ml, a["ml_id"], novo_preco)
+            await asyncio.to_thread(database.atualizar_anuncio, a["id"], preco=novo_preco)
+            atualizados += 1
+        except Exception as e:
+            erros.append({"anuncio_id": a["id"], "ml_id": a["ml_id"], "erro": str(e)})
+
+    return {
+        "atualizados": atualizados,
+        "erros": len(erros),
+        "detalhes_erros": erros,
+    }
 
 
 @app.post("/api/admin/ml/registrar-webhook")
