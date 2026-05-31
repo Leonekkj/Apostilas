@@ -1613,8 +1613,9 @@ async function gerarLinhaProduto() {
         method: 'POST',
         body: JSON.stringify({ nome, topico_id: topicoId, tema }),
       });
-      data = await res.json();
-      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      const text = await res.text();
+      data = text ? JSON.parse(text) : {};
+      if (!res.ok) throw new Error(data.detail || `Erro HTTP ${res.status}`);
       const n = data.volumes?.length || 4;
       showToast(`${n} volumes de "${nome}" criados com sucesso!`, 'success');
     } else {
