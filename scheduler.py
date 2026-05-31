@@ -143,14 +143,13 @@ def gerar_kits_automaticos():
                     nome = gen_content.sugerir_nome_kit(apostilas_objs)
                     kit_id = database.criar_kit(nome, apostila_ids)
 
-                    # Preço: soma individual com 10% de desconto
+                    # Preço: soma individual com 15% de desconto
                     preco_individual = _PRECOS_PRODUTO.get(num_ex, 29.90)
-                    preco_kit = round(preco_individual * r * 0.90, 2)
+                    preco_kit = round(preco_individual * r * 0.85, 2)
 
                     total_exercicios = num_ex * r
                     titulos = gen_content.gerar_titulos_kit_ml(nome, apostilas_objs, total_exercicios)
-                    topico_kit = {"nome": nome}
-                    descricao = gen_content.gerar_descricao_ml(topico_kit, total_exercicios)
+                    descricao = gen_content.gerar_descricao_kit_ml(nome, apostilas_objs, total_exercicios)
 
                     for i, title in enumerate(titulos, start=1):
                         variacao_img = ((i - 1) % 3) + 1  # 1,2,3,1,2,3 para os 6 anúncios

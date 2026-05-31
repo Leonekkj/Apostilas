@@ -575,15 +575,17 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
         titulos = await asyncio.to_thread(
             content.gerar_titulos_kit_ml, nome, apostilas, total_exercicios
         )
-        topico_kit = {"nome": nome}
-        descricao_kit = await asyncio.to_thread(content.gerar_descricao_ml, topico_kit, total_exercicios)
+        descricao_kit = await asyncio.to_thread(
+            content.gerar_descricao_kit_ml, nome, apostilas, total_exercicios
+        )
 
         anuncios_result = []
 
         for i, title in enumerate(titulos, start=1):
+            variacao_img = ((i - 1) % 3) + 1
             # Generate kit cover images
             image_paths = await asyncio.to_thread(
-                images.gerar_capas_kit, kit_id, nome, apostilas, i
+                images.gerar_capas_kit, kit_id, nome, apostilas, variacao_img
             )
             generated_files.extend(image_paths)
             image_path = image_paths[0] if image_paths else None

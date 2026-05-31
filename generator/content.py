@@ -6,6 +6,7 @@ Funções:
   gerar_conteudo(topico, num_exercicios)       -> str (JSON)
   gerar_titulos_ml(topico, num_exercicios)     -> list[dict]
   gerar_titulos_kit_ml(kit_nome, apostilas, num_exercicios_total) -> list[dict]
+  gerar_descricao_kit_ml(kit_nome, apostilas, total_exercicios)  -> str
   sugerir_nome_kit(apostilas)                  -> str
 """
 
@@ -799,7 +800,7 @@ def gerar_titulos_kit_ml(
     Returns:
         Lista de 6 dicts: [{"variacao": int, "angulo": str, "titulo": str, "descricao": str}]
     """
-    nomes = ", ".join(a.get("nome", a.get("name", str(a))) for a in apostilas)
+    nomes = ", ".join(a.get("topico_nome", a.get("nome", a.get("name", str(a)))) for a in apostilas)
     qtd_apostilas = len(apostilas)
 
     angulos_kit = [
@@ -878,7 +879,7 @@ def sugerir_nome_kit(apostilas: list[dict]) -> str:
     Returns:
         String com o nome sugerido, ex: "Kit Memória + Atenção"
     """
-    nomes = ", ".join(a.get("nome", a.get("name", str(a))) for a in apostilas)
+    nomes = ", ".join(a.get("topico_nome", a.get("nome", a.get("name", str(a)))) for a in apostilas)
 
     prompt = f"""\
 Sugira um nome comercial atraente para um kit de apostilas físicas de estimulação cognitiva.
@@ -904,7 +905,67 @@ Retorne SOMENTE o nome, sem aspas, sem ponto final, sem explicação.\
 
 
 # ---------------------------------------------------------------------------
-# 5. fatiar_conteudo
+# 5. gerar_descricao_kit_ml
+# ---------------------------------------------------------------------------
+
+def gerar_descricao_kit_ml(kit_nome: str, apostilas: list[dict], total_exercicios: int) -> str:
+    """Gera descrição para anúncio de kit no ML, mencionando todas as apostilas."""
+    nomes = ", ".join(a.get("topico_nome", a.get("nome", a.get("name", str(a)))) for a in apostilas)
+    qtd = len(apostilas)
+
+    prompt = f"""\
+Crie uma descrição de produto para o Mercado Livre de um kit de apostilas físicas impressas de estimulação cognitiva.
+
+Kit: {kit_nome}
+Apostilas incluídas ({qtd}): {nomes}
+Total de exercícios: {total_exercicios}
+Público: idosos 60+, cuidadores, terapeutas ocupacionais
+Marca: CogniVita
+
+Use EXATAMENTE este formato (mantenha os títulos em maiúscula, use • para bullets):
+
+KIT DE APOSTILAS FÍSICAS — ESTIMULAÇÃO COGNITIVA PARA IDOSOS
+[1 parágrafo de 2 frases apresentando o kit e as {qtd} apostilas incluídas: {nomes}]
+
+Indicado para:
+• [uso 1]
+• [uso 2]
+• [uso 3]
+• [uso 4]
+
+O QUE VOCÊ RECEBE
+• {qtd} apostilas físicas impressas
+• {total_exercicios} exercícios no total
+• [item específico do kit]
+• [item específico do kit]
+
+BENEFÍCIOS
+• [benefício 1 relacionado ao kit]
+• [benefício 2]
+• [benefício 3]
+• [benefício 4]
+
+APOSTILAS DO KIT
+{chr(10).join(f'• {a.get("topico_nome", a.get("nome", ""))}' for a in apostilas)}
+
+ESPECIFICAÇÕES
+• Tipo: Kit de Apostilas Físicas Impressas
+• Quantidade: {qtd} apostilas / {total_exercicios} atividades no total
+• Tamanho: A4
+• Impressão: Preto e Branco
+• Fonte: Ampliada (ideal para idosos)
+
+Retorne APENAS o texto acima preenchido, sem JSON, sem markdown, sem comentários.\
+"""
+
+    return _chat_completions([
+        {"role": "system", "content": _SYSTEM_TITULOS},
+        {"role": "user", "content": prompt},
+    ], max_tokens=700, json_mode=False).strip()
+
+
+# ---------------------------------------------------------------------------
+# 6. fatiar_conteudo
 # ---------------------------------------------------------------------------
 
 def fatiar_conteudo(conteudo_json: str, n: int) -> str:
