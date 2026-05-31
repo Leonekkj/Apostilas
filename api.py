@@ -411,8 +411,11 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
 
     volumes = []
     try:
-        from gerar_caca_palavras import gerar_pdf_caca_palavras
         from generator import images as gen_images
+        topico_cp = {"id": body.topico_id, "nome": "Caça-Palavras", "slug": "caca-palavras"}
+
+        # Fase 1: cria todos os registros no banco (sem gerar PDF)
+        registros = []
         for dificuldade, num_puzzles in _CP_VOLUMES:
             nivel_l   = _NIVEL_LABEL.get(dificuldade, dificuldade.title())
             nome_vol  = f"{body.nome} — {nivel_l}"
@@ -427,31 +430,28 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
             apostila_id = await asyncio.to_thread(
                 database.salvar_apostila, body.topico_id, num_puzzles, "{}", produto_id
             )
-            pdf_path = await asyncio.to_thread(
-                gerar_pdf_caca_palavras,
-                apostila_id, nome_vol, body.tema, dificuldade, num_puzzles,
-            )
-            await asyncio.to_thread(
-                database.salvar_conteudo_apostila, apostila_id, "{}", pdf_path
-            )
-
-            # Gera imagem de capa para o anúncio
-            topico_cp = {"id": body.topico_id, "nome": "Caça-Palavras", "slug": "caca-palavras"}
-            try:
-                imagem_paths = await asyncio.to_thread(
-                    gen_images.gerar_capas, apostila_id, topico_cp, num_puzzles, 1
-                )
-                imagem_path = imagem_paths[0] if imagem_paths else ""
-            except Exception:
-                imagem_path = ""
-
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,
                 apostila_id, "digital", 1, titulo_ml, preco, 1, "", None, descricao,
             )
+            registros.append((dificuldade, num_puzzles, nome_vol, preco, produto_id, apostila_id, anuncio_id))
+
+        # Fase 2: gera imagens em paralelo para todos os volumes
+        async def _gerar_imagem(apostila_id, num_puzzles):
+            try:
+                paths = await asyncio.to_thread(gen_images.gerar_capas, apostila_id, topico_cp, num_puzzles, 1)
+                return paths[0] if paths else ""
+            except Exception:
+                return ""
+
+        imagens = await asyncio.gather(*[
+            _gerar_imagem(r[5], r[1]) for r in registros
+        ])
+
+        # Fase 3: salva imagens e monta resposta
+        for (dificuldade, num_puzzles, nome_vol, preco, produto_id, apostila_id, anuncio_id), imagem_path in zip(registros, imagens):
             if imagem_path:
                 await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, imagem_path=imagem_path)
-
             volumes.append({
                 "dificuldade": dificuldade,
                 "produto_id":  produto_id,
