@@ -1364,44 +1364,100 @@ function toRoman(n) {
   return r;
 }
 
+const _categoriasExpandidas = {};
+
+function _categoriaLabel(topico_slug) {
+  return topico_slug === 'caca-palavras' ? 'Caça-Palavras' : 'Cognitivo';
+}
+
+function toggleCategoria(cat) {
+  _categoriasExpandidas[cat] = !_categoriasExpandidas[cat];
+  const icon = document.getElementById(`cat-icon-${cat}`);
+  const expanded = _categoriasExpandidas[cat];
+  if (icon) icon.textContent = expanded ? '▾' : '▸';
+  // Mostra/oculta todos os elementos desta categoria
+  document.querySelectorAll(`[data-categoria="${cat}"]`).forEach(el => {
+    el.style.display = expanded ? '' : 'none';
+  });
+  // Se recolhendo, oculta também as linhas de anúncios dos subgrupos
+  if (!expanded) {
+    document.querySelectorAll(`[data-grupo]`).forEach(el => {
+      if (el.dataset.categoria === cat) el.style.display = 'none';
+    });
+  }
+}
+
+function _renderProdutoCard(p) {
+  const total = p.total_anuncios || 0;
+  const pub   = p.anuncios_publicados || 0;
+  const rasc  = p.anuncios_rascunho || 0;
+  const pct   = total ? Math.round((pub / total) * 100) : 0;
+  const thumbId = p.thumb_apostila_id;
+  const thumb = thumbId
+    ? `<img class="card-thumb" src="/output/images/apostila_${thumbId}_v1.png" alt="capa" onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>📚</div>'">`
+    : `<div class="card-thumb-placeholder">📚</div>`;
+  const serieRoman = p.serie ? ` <span style="color:var(--primary);font-weight:600;">Vol. ${toRoman(p.serie)}</span>` : '';
+  const qtdApostilas = (p.apostilas || []).length;
+  return `
+    <div class="card" id="produto-card-${p.id}">
+      ${thumb}
+      <div class="card-body">
+        <div class="card-title">${esc(p.nome || p.topico_nome || 'Apostila')}${serieRoman}</div>
+        <div class="card-sub">${qtdApostilas} apostilas · ${esc(p.topico_nome || '')}</div>
+        <div class="card-progress-wrap">
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+          <div class="progress-label">
+            <span>${pub}</span> publicados &nbsp;·&nbsp; <span>${rasc}</span> rascunhos
+          </div>
+        </div>
+        <div style="margin-top:8px;text-align:right;">
+          <button class="btn btn-sm" style="background:transparent;color:var(--error);border:1px solid var(--error);"
+            onclick="deletarProduto(${p.id}, this)" title="Excluir produto e fechar anúncios no ML">
+            Excluir
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderProdutos(list) {
   const grid = document.getElementById('produtos-grid');
   if (!list.length) {
     grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><p>Nenhum produto ainda.</p><p class="empty-hint">Crie sua primeira apostila com "+ Novo Produto".</p></div>`;
     return;
   }
-  grid.innerHTML = list.map(p => {
-    const total = p.total_anuncios || 0;
-    const pub   = p.anuncios_publicados || 0;
-    const rasc  = p.anuncios_rascunho || 0;
-    const pct   = total ? Math.round((pub / total) * 100) : 0;
-    const thumbId = p.thumb_apostila_id;
-    const thumb = thumbId
-      ? `<img class="card-thumb" src="/output/images/apostila_${thumbId}_v1.png" alt="capa" onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>📚</div>'">`
-      : `<div class="card-thumb-placeholder">📚</div>`;
-    const serieRoman = p.serie ? ` <span style="color:var(--primary);font-weight:600;">Vol. ${toRoman(p.serie)}</span>` : '';
-    const qtdApostilas = (p.apostilas || []).length;
-    return `
-      <div class="card" id="produto-card-${p.id}">
-        ${thumb}
-        <div class="card-body">
-          <div class="card-title">${esc(p.nome || p.topico_nome || 'Apostila')}${serieRoman}</div>
-          <div class="card-sub">${qtdApostilas} apostilas · ${esc(p.topico_nome || '')}</div>
-          <div class="card-progress-wrap">
-            <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-            <div class="progress-label">
-              <span>${pub}</span> publicados &nbsp;·&nbsp; <span>${rasc}</span> rascunhos
-            </div>
-          </div>
-          <div style="margin-top:8px;text-align:right;">
-            <button class="btn btn-sm" style="background:transparent;color:var(--error);border:1px solid var(--error);"
-              onclick="deletarProduto(${p.id}, this)" title="Excluir produto e fechar anúncios no ML">
-              Excluir
-            </button>
-          </div>
-        </div>
+
+  // Agrupa por categoria
+  const grupos = {};
+  for (const p of list) {
+    const cat = _categoriaLabel(p.topico_slug);
+    if (!grupos[cat]) grupos[cat] = [];
+    grupos[cat].push(p);
+  }
+
+  let html = '';
+  for (const [cat, produtos] of Object.entries(grupos)) {
+    if (_categoriasExpandidas[cat] === undefined) _categoriasExpandidas[cat] = true;
+    const expanded = _categoriasExpandidas[cat];
+    const pub = produtos.reduce((s, p) => s + (p.anuncios_publicados || 0), 0);
+    const total = produtos.reduce((s, p) => s + (p.total_anuncios || 0), 0);
+    const catId = cat.replace(/\s/g, '_');
+
+    html += `
+      <div style="grid-column:1/-1;background:var(--surface,#f5f5f0);border-radius:8px;padding:10px 14px;margin-bottom:4px;display:flex;align-items:center;gap:8px;border:1px solid var(--border);">
+        <button onclick="toggleCategoria('${catId}')"
+          style="background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:14px;font-weight:700;color:var(--text);padding:0;">
+          <span id="cat-icon-${catId}" style="font-size:16px;">${expanded ? '▾' : '▸'}</span>
+          ${esc(cat)}
+        </button>
+        <span style="font-weight:400;color:var(--muted);font-size:12px;">${produtos.length} produtos · ${pub} publicados de ${total} anúncios</span>
       </div>`;
-  }).join('');
+
+    for (const p of produtos) {
+      html += `<div data-categoria="${catId}" style="display:${expanded ? '' : 'none'};">${_renderProdutoCard(p)}</div>`;
+    }
+  }
+  grid.innerHTML = html;
 }
 
 // ─────────────────────────────────────────────
@@ -1726,40 +1782,61 @@ function renderAnuncios(list) {
     return;
   }
 
-  // Agrupa por produto/kit/não-linkado
-  const grupos = {};
+  // Agrupa por categoria > produto/kit/não-linkado
+  const categorias = {};
   for (const a of list) {
+    const cat = _categoriaLabel(a.topico_slug);
     const key = a.produto_nome || a.kit_nome || (a.topico_nome ? a.topico_nome : null) || '— Não linkado —';
-    if (!grupos[key]) grupos[key] = [];
-    grupos[key].push(a);
+    if (!categorias[cat]) categorias[cat] = {};
+    if (!categorias[cat][key]) categorias[cat][key] = [];
+    categorias[cat][key].push(a);
   }
 
   let html = '';
-  let idx = 0;
-  for (const [grupoKey, anuncios] of Object.entries(grupos)) {
-    if (_gruposExpandidos[idx] === undefined) _gruposExpandidos[idx] = true;
-    const expanded = _gruposExpandidos[idx];
-    const pub = anuncios.filter(a => a.status === 'publicado').length;
-    const total = anuncios.length;
-    const i = idx;
+  let grupoIdx = 0;
+  for (const [cat, grupos] of Object.entries(categorias)) {
+    const catId = 'an_' + cat.replace(/\s/g, '_');
+    if (_categoriasExpandidas[catId] === undefined) _categoriasExpandidas[catId] = true;
+    const catExpanded = _categoriasExpandidas[catId];
+    const totalCat = Object.values(grupos).flat().length;
+    const pubCat = Object.values(grupos).flat().filter(a => a.status === 'publicado').length;
 
     html += `
-      <tr style="background:var(--surface,#f5f5f0);border-top:2px solid var(--border);">
-        <td colspan="9" style="padding:8px 12px;">
-          <button onclick="toggleGrupo(${i})"
-            style="background:none;border:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--text);padding:0;display:flex;align-items:center;gap:6px;">
-            <span id="toggle-icon-${i}" style="font-size:16px;">${expanded ? '▾' : '▸'}</span>
-            ${esc(grupoKey)}
-            <span style="font-weight:400;color:var(--muted);font-size:12px;">${pub} publicados · ${total} total</span>
+      <tr style="background:var(--primary-light,#e8f4ee);border-top:3px solid var(--primary);">
+        <td colspan="9" style="padding:10px 14px;">
+          <button onclick="toggleCategoria('${catId}')"
+            style="background:none;border:none;cursor:pointer;font-size:14px;font-weight:700;color:var(--text);padding:0;display:flex;align-items:center;gap:6px;">
+            <span id="cat-icon-${catId}" style="font-size:16px;">${catExpanded ? '▾' : '▸'}</span>
+            ${esc(cat)}
+            <span style="font-weight:400;color:var(--muted);font-size:12px;">${pubCat} publicados · ${totalCat} total</span>
           </button>
         </td>
       </tr>`;
 
-    for (const a of anuncios) {
-      const row = _renderAnuncioRow(a);
-      html += row.replace('<tr ', `<tr data-grupo="${i}" style="display:${expanded ? '' : 'none'}" `);
+    for (const [grupoKey, anuncios] of Object.entries(grupos)) {
+      if (_gruposExpandidos[grupoIdx] === undefined) _gruposExpandidos[grupoIdx] = true;
+      const expanded = _gruposExpandidos[grupoIdx] && catExpanded;
+      const pub = anuncios.filter(a => a.status === 'publicado').length;
+      const i = grupoIdx;
+
+      html += `
+        <tr data-categoria="${catId}" style="background:var(--surface,#f5f5f0);border-top:1px solid var(--border);display:${catExpanded ? '' : 'none'};">
+          <td colspan="9" style="padding:7px 14px 7px 28px;">
+            <button onclick="toggleGrupo(${i})"
+              style="background:none;border:none;cursor:pointer;font-size:13px;font-weight:600;color:var(--text);padding:0;display:flex;align-items:center;gap:6px;">
+              <span id="toggle-icon-${i}" style="font-size:15px;">${_gruposExpandidos[i] ? '▾' : '▸'}</span>
+              ${esc(grupoKey)}
+              <span style="font-weight:400;color:var(--muted);font-size:12px;">${pub} publicados · ${anuncios.length} total</span>
+            </button>
+          </td>
+        </tr>`;
+
+      for (const a of anuncios) {
+        const row = _renderAnuncioRow(a);
+        html += row.replace('<tr ', `<tr data-grupo="${i}" data-categoria="${catId}" style="display:${expanded ? '' : 'none'}" `);
+      }
+      grupoIdx++;
     }
-    idx++;
   }
   tbody.innerHTML = html;
 }
@@ -1984,29 +2061,61 @@ function renderVendasResumo(lista) {
     grid.innerHTML = '<p style="color:var(--muted);font-size:13px;">Nenhuma venda registrada. Clique em "Sincronizar" para buscar do Mercado Livre.</p>';
     return;
   }
-  grid.innerHTML = lista.map(a => {
-    const titulo = a.apostila_id == null
-      ? esc(a.topico_nome || 'Outros anúncios')
-      : `${esc(a.topico_nome || '—')} — ${a.num_exercicios}ex`;
-    const fat = a.faturamento != null ? `R$ ${parseFloat(a.faturamento).toFixed(2).replace('.', ',')}` : 'R$ 0,00';
-    const clickHandler = a.apostila_id != null
-      ? `onclick="openPedidosDrawer(${a.apostila_id}, '${titulo.replace(/'/g, "\\'")}')" style="cursor:pointer;"`
-      : `onclick="openOutrosDrawer()" style="cursor:pointer;"`;
-    return `
-      <div class="venda-card" ${clickHandler}>
-        <div class="venda-card-title">${titulo}</div>
-        <div class="venda-card-stats">
-          <div class="venda-stat">
-            <span class="venda-stat-value">${a.total_vendas}</span>
-            <span class="venda-stat-label">vendas</span>
-          </div>
-          <div class="venda-stat">
-            <span class="venda-stat-value" style="font-size:16px;">${fat}</span>
-            <span class="venda-stat-label">faturamento</span>
-          </div>
-        </div>
+
+  // Agrupa por categoria
+  const categorias = {};
+  for (const a of lista) {
+    const cat = _categoriaLabel(a.topico_slug);
+    if (!categorias[cat]) categorias[cat] = [];
+    categorias[cat].push(a);
+  }
+
+  let html = '';
+  for (const [cat, itens] of Object.entries(categorias)) {
+    const catId = 'vd_' + cat.replace(/\s/g, '_');
+    if (_categoriasExpandidas[catId] === undefined) _categoriasExpandidas[catId] = true;
+    const expanded = _categoriasExpandidas[catId];
+    const totalVendas = itens.reduce((s, a) => s + (a.total_vendas || 0), 0);
+    const totalFat = itens.reduce((s, a) => s + parseFloat(a.faturamento || 0), 0);
+    const fatFmt = `R$ ${totalFat.toFixed(2).replace('.', ',')}`;
+
+    html += `
+      <div style="grid-column:1/-1;background:var(--surface,#f5f5f0);border-radius:8px;padding:10px 14px;margin-bottom:4px;display:flex;align-items:center;gap:8px;border:1px solid var(--border);">
+        <button onclick="toggleCategoria('${catId}')"
+          style="background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:14px;font-weight:700;color:var(--text);padding:0;">
+          <span id="cat-icon-${catId}">${expanded ? '▾' : '▸'}</span>
+          ${esc(cat)}
+        </button>
+        <span style="font-weight:400;color:var(--muted);font-size:12px;">${totalVendas} vendas · ${fatFmt}</span>
       </div>`;
-  }).join('');
+
+    for (const a of itens) {
+      const titulo = a.apostila_id == null
+        ? esc(a.topico_nome || 'Outros anúncios')
+        : `${esc(a.topico_nome || '—')} — ${a.num_exercicios}ex`;
+      const fat = a.faturamento != null ? `R$ ${parseFloat(a.faturamento).toFixed(2).replace('.', ',')}` : 'R$ 0,00';
+      const clickHandler = a.apostila_id != null
+        ? `onclick="openPedidosDrawer(${a.apostila_id}, '${titulo.replace(/'/g, "\\'")}')" style="cursor:pointer;"`
+        : `onclick="openOutrosDrawer()" style="cursor:pointer;"`;
+      html += `
+        <div data-categoria="${catId}" style="display:${expanded ? '' : 'none'};">
+          <div class="venda-card" ${clickHandler}>
+            <div class="venda-card-title">${titulo}</div>
+            <div class="venda-card-stats">
+              <div class="venda-stat">
+                <span class="venda-stat-value">${a.total_vendas}</span>
+                <span class="venda-stat-label">vendas</span>
+              </div>
+              <div class="venda-stat">
+                <span class="venda-stat-value" style="font-size:16px;">${fat}</span>
+                <span class="venda-stat-label">faturamento</span>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }
+  }
+  grid.innerHTML = html;
 }
 
 async function syncVendas(btn) {
