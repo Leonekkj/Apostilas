@@ -1032,15 +1032,25 @@ async def ml_webhook(request: Request):
                 import logging
                 logging.info(f"[webhook] Gerando PDF para apostila {apostila_id} sob demanda...")
                 try:
-                    from generator import content as _content, pdf as _gen_pdf
-                    topico = {
-                        "id": apostila["topico_id"],
-                        "nome": apostila.get("topico_nome", ""),
-                        "descricao": "",
-                    }
-                    conteudo_json = _content.gerar_conteudo(topico, apostila["num_exercicios"])
-                    pdf_path = _gen_pdf.gerar_pdf(apostila_id, topico, conteudo_json)
-                    database.salvar_conteudo_apostila(apostila_id, conteudo_json, pdf_path)
+                    is_cp = apostila.get("topico_slug") == "caca-palavras"
+                    if is_cp:
+                        from gerar_caca_palavras import gerar_pdf_caca_palavras as _gerar_cp
+                        tema        = apostila.get("produto_tema") or "geral"
+                        dificuldade = apostila.get("produto_dificuldade") or "medio"
+                        num_puzzles = apostila.get("num_exercicios") or 60
+                        nome_vol    = apostila.get("produto_nome") or "Caça-Palavras"
+                        pdf_path = _gerar_cp(apostila_id, nome_vol, tema, dificuldade, num_puzzles)
+                        database.salvar_conteudo_apostila(apostila_id, "{}", pdf_path)
+                    else:
+                        from generator import content as _content, pdf as _gen_pdf
+                        topico = {
+                            "id": apostila["topico_id"],
+                            "nome": apostila.get("topico_nome", ""),
+                            "descricao": "",
+                        }
+                        conteudo_json = _content.gerar_conteudo(topico, apostila["num_exercicios"])
+                        pdf_path = _gen_pdf.gerar_pdf(apostila_id, topico, conteudo_json)
+                        database.salvar_conteudo_apostila(apostila_id, conteudo_json, pdf_path)
                 except Exception as exc:
                     logging.warning(f"[webhook] Falha ao gerar PDF apostila {apostila_id}: {exc}")
                     continue

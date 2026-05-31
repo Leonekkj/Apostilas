@@ -705,12 +705,15 @@ def buscar_topico_por_id(topico_id: int) -> Optional[dict]:
 
 
 def buscar_apostila_por_id(apostila_id: int) -> Optional[dict]:
-    """Retorna uma apostila pelo id com dados do tópico, ou None se não encontrada."""
+    """Retorna uma apostila pelo id com dados do tópico e produto, ou None se não encontrada."""
     with _get_conn() as conn:
         cur = _cursor(conn)
         cur.execute(
-            f"SELECT ap.*, tp.nome AS topico_nome, tp.slug AS topico_slug "
-            f"FROM apostilas ap LEFT JOIN topicos tp ON ap.topico_id = tp.id "
+            f"SELECT ap.*, tp.nome AS topico_nome, tp.slug AS topico_slug, "
+            f"p.nome AS produto_nome, p.tema AS produto_tema, p.dificuldade AS produto_dificuldade "
+            f"FROM apostilas ap "
+            f"LEFT JOIN topicos tp ON ap.topico_id = tp.id "
+            f"LEFT JOIN produtos p ON ap.produto_id = p.id "
             f"WHERE ap.id = {PH}",
             (apostila_id,),
         )
