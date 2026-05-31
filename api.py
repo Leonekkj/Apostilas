@@ -398,7 +398,7 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
 @app.post("/api/produto/caca-palavras")
 async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=Depends(_require_auth)):
     """Cria 4 volumes (Fácil/Médio/Difícil/Gigante) de uma vez, com PDF e anúncio por volume."""
-    from gerar_caca_palavras import gerar_pdf_caca_palavras
+    import traceback
 
     topico = await asyncio.to_thread(database.buscar_topico_por_id, body.topico_id)
     if topico is None:
@@ -408,6 +408,7 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
 
     volumes = []
     try:
+        from gerar_caca_palavras import gerar_pdf_caca_palavras
         for dificuldade, num_puzzles in _CP_VOLUMES:
             nivel_l   = _NIVEL_LABEL.get(dificuldade, dificuldade.title())
             nome_vol  = f"{body.nome} — {nivel_l}"
@@ -442,7 +443,9 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
                 "nome":        nome_vol,
             })
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Erro ao criar caça-palavras: {exc}") from exc
+        tb = traceback.format_exc()
+        print(f"[ERRO caca-palavras] {exc}\n{tb}")
+        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
 
     return {"tema": body.tema, "volumes": volumes}
 
