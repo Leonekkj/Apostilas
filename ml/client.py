@@ -19,21 +19,32 @@ ML_API_BASE = "https://api.mercadolibre.com"
 ML_PICTURES_ENDPOINT = f"{ML_API_BASE}/pictures"
 ML_ITEMS_ENDPOINT = f"{ML_API_BASE}/items"
 
-# Fallback quando ML_CATEGORIA_ID forçado ou predict falha
-# MLB455868 = Ebooks → PI issues; substituído por MLB1227 (Outros/Livros) para digitais
-_EBOOKS_CAT   = "MLB455868"
+# MLB455868 = Ebooks — NUNCA usar: conta pode ser desativada por PI/exclusão automática
+_CATS_BLOQUEADAS = {"MLB455868"}
+
 _FALLBACK_DIG = os.getenv("ML_CATEGORIA_DIGITAL_ID", "MLB1227")
 _FALLBACK_FIS = os.getenv("ML_CATEGORIA_FISICO_ID",  "MLB1726")
 # Legado: ML_CATEGORIA_ID sobrescreve tudo
 _legado = os.getenv("ML_CATEGORIA_ID")
 
 
+def _safe_cat(cat: str, is_digital: bool) -> str:
+    """Garante que a categoria nunca seja uma das bloqueadas (ex: Ebooks)."""
+    if cat in _CATS_BLOQUEADAS:
+        fallback = _FALLBACK_DIG if is_digital else _FALLBACK_FIS
+        print(f"[ML] BLOQUEADO categoria {cat} → usando {fallback}")
+        return fallback
+    return cat
+
+
 def _predict_categoria(titulo: str, is_digital: bool) -> str:
     """Consulta ML domain_discovery para obter a categoria ideal para o título.
-    Se retornar Ebooks (MLB455868) substitui pelo fallback digital para evitar PI.
-    Retorna o fallback hardcoded se a chamada falhar."""
+    Nunca retorna categorias bloqueadas (Ebooks). Usa fallback se predict falhar."""
+    fallback = _FALLBACK_DIG if is_digital else _FALLBACK_FIS
+
     if _legado:
-        return _legado
+        return _safe_cat(_legado, is_digital)
+
     try:
         r = requests.get(
             "https://api.mercadolibre.com/sites/MLB/domain_discovery/search",
@@ -44,13 +55,11 @@ def _predict_categoria(titulo: str, is_digital: bool) -> str:
             data = r.json()
             if data:
                 cat = data[0]["category_id"]
-                # Ebooks bloqueado por PI — troca pelo fallback digital
-                if cat == _EBOOKS_CAT:
-                    return _FALLBACK_DIG
-                return cat
+                return _safe_cat(cat, is_digital)
     except Exception as _e:
         print(f"[ML predict_categoria] falha: {_e}")
-    return _FALLBACK_DIG if is_digital else _FALLBACK_FIS
+
+    return fallback
 
 # Pasta com imagens reais da marca CogniVita (jpg/jpeg/png, até 3 usadas por listing)
 _BRAND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "brand")
@@ -265,6 +274,8 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     titulo = _fit_titulo(anuncio.get("titulo", "Apostila Cognitiva"))
     is_digital = anuncio.get("tipo", "fisico") == "digital"
     categoria_id = _predict_categoria(titulo, is_digital)
+    # Barreira final — nunca deixa Ebooks chegar ao payload
+    categoria_id = _safe_cat(categoria_id, is_digital)
     print(f"[ML] categoria selecionada: {categoria_id} (titulo={titulo[:50]!r})")
 
     # Build item payload
