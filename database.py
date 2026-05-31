@@ -274,12 +274,12 @@ def criar_tabelas() -> None:
 
         conn.commit()
 
+    seed_topicos()
     _upsert_topico(
         "Caça-Palavras",
         "caca-palavras",
         "caca palavras idosos passatempo letras busca",
     )
-    seed_topicos()
 
 
 def _add_columns(cur, conn, table: str, columns: list) -> None:
@@ -1100,15 +1100,15 @@ def criar_produto(nome: str, topico_id: int, serie: int = 1) -> int:
         return row_id
 
 
-def criar_produto_caca_palavras(nome: str, topico_id: int, tema: str, dificuldade: str) -> int:
+def criar_produto_caca_palavras(nome: str, topico_id: int, tema: str, dificuldade: str, serie: int = 1) -> int:
     """Cria produto de caça-palavras com tema e dificuldade."""
     with _get_conn() as conn:
         cur = _cursor(conn)
         sql = _insert_returning(
-            f"INSERT INTO produtos (nome, topico_id, tema, dificuldade) "
-            f"VALUES ({PH}, {PH}, {PH}, {PH})"
+            f"INSERT INTO produtos (nome, topico_id, tema, dificuldade, serie) "
+            f"VALUES ({PH}, {PH}, {PH}, {PH}, {PH})"
         )
-        cur.execute(sql, (nome, topico_id, tema, dificuldade))
+        cur.execute(sql, (nome, topico_id, tema, dificuldade, serie))
         row_id = _lastrowid(cur, conn)
         conn.commit()
         return row_id
