@@ -1094,6 +1094,35 @@ async def ml_webhook(request: Request):
     return {"status": "received"}
 
 
+@app.post("/api/admin/anuncios/reverter-precos-digital")
+async def reverter_precos_digital(_auth=Depends(_require_auth)):
+    """Reverte preços dos anúncios digitais cognitivos para a tabela correta."""
+    from ml import client as ml_client
+
+    anuncios = await asyncio.to_thread(database.listar_anuncios, status="publicado")
+    digitais = [
+        a for a in anuncios
+        if a.get("topico_slug") != "caca-palavras"
+        and a.get("ml_id")
+        and a.get("tipo") == "digital"
+    ]
+
+    atualizados, erros = 0, []
+    for a in digitais:
+        num_ex = a.get("num_exercicios")
+        preco_correto = _PRECOS_DIGITAL.get(num_ex)
+        if not preco_correto:
+            continue
+        try:
+            await asyncio.to_thread(ml_client.atualizar_preco_ml, a["ml_id"], preco_correto)
+            await asyncio.to_thread(database.atualizar_anuncio, a["id"], preco=preco_correto)
+            atualizados += 1
+        except Exception as e:
+            erros.append({"anuncio_id": a["id"], "ml_id": a["ml_id"], "erro": str(e)})
+
+    return {"atualizados": atualizados, "erros": len(erros), "detalhes_erros": erros}
+
+
 @app.post("/api/admin/anuncios/atualizar-precos-cognitivo")
 async def atualizar_precos_cognitivo(_auth=Depends(_require_auth)):
     """Aplica a nova tabela de preços em todos os anúncios cognitivos publicados no ML."""
