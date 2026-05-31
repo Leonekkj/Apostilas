@@ -106,6 +106,12 @@ def _require_auth(
 
 _FATIAS = [30, 60, 90, 120, 150, 200]
 _PRECOS_PRODUTO = {30: 14.90, 60: 19.90, 90: 24.90, 120: 29.90, 150: 34.90, 200: 44.90}
+_PRECOS_CACA_PALAVRAS = {
+    "facil":   14.90,
+    "medio":   17.90,
+    "dificil": 19.90,
+    "gigante": 34.90,
+}
 
 
 def _get_preco(num_exercicios: int) -> float:
@@ -354,8 +360,13 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
         await asyncio.to_thread(
             database.salvar_conteudo_apostila, apostila_id, "{}", pdf_path
         )
+        preco = _PRECOS_CACA_PALAVRAS.get(body.dificuldade, 17.90)
+        # Temáticos têm o mesmo preço do Médio
+        if body.tema != "geral" and body.dificuldade not in _PRECOS_CACA_PALAVRAS:
+            preco = 17.90
         anuncio_id = await asyncio.to_thread(
-            database.criar_anuncio, apostila_id, "digital"
+            database.criar_anuncio,
+            apostila_id, "digital", 1, body.nome, preco,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao criar caça-palavras: {exc}") from exc
@@ -365,6 +376,7 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
         "apostila_id": apostila_id,
         "anuncio_id": anuncio_id,
         "pdf_path": pdf_path,
+        "preco": preco,
     }
 
 
