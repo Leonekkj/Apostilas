@@ -137,6 +137,14 @@ class ProdutoLinhaRequest(BaseModel):
     precos: Optional[dict] = None  # {30: 14.90, 60: 19.90, ...} — sobrescreve _PRECOS_PRODUTO
 
 
+class CacaPalavrasRequest(BaseModel):
+    nome: str = Field(..., min_length=1, max_length=120)
+    topico_id: int
+    tema: str = Field(default="geral")
+    dificuldade: str = Field(default="medio")
+    num_puzzles: int = Field(default=60, ge=10, le=300)
+
+
 class KitRequest(BaseModel):
     apostila_ids: list[int]
     nome: Optional[str] = None
@@ -319,6 +327,45 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             except Exception:
                 pass
         raise HTTPException(status_code=500, detail=f"Erro ao gerar produto: {exc}") from exc
+
+
+@app.post("/api/produto/caca-palavras")
+async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=Depends(_require_auth)):
+    from gerar_caca_palavras import gerar_pdf_caca_palavras
+
+    topico = await asyncio.to_thread(database.buscar_topico_por_id, body.topico_id)
+    if topico is None:
+        raise HTTPException(status_code=404, detail=f"Tópico {body.topico_id} não encontrado")
+    if topico.get("slug") != "caca-palavras":
+        raise HTTPException(status_code=400, detail="Use o tópico de slug 'caca-palavras'")
+
+    try:
+        produto_id = await asyncio.to_thread(
+            database.criar_produto_caca_palavras,
+            body.nome, body.topico_id, body.tema, body.dificuldade,
+        )
+        apostila_id = await asyncio.to_thread(
+            database.salvar_apostila, body.topico_id, body.num_puzzles, "", produto_id
+        )
+        pdf_path = await asyncio.to_thread(
+            gerar_pdf_caca_palavras,
+            apostila_id, body.nome, body.tema, body.dificuldade, body.num_puzzles,
+        )
+        await asyncio.to_thread(
+            database.salvar_conteudo_apostila, apostila_id, "{}", pdf_path
+        )
+        anuncio_id = await asyncio.to_thread(
+            database.criar_anuncio, apostila_id, "digital"
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao criar caça-palavras: {exc}") from exc
+
+    return {
+        "produto_id": produto_id,
+        "apostila_id": apostila_id,
+        "anuncio_id": anuncio_id,
+        "pdf_path": pdf_path,
+    }
 
 
 # ---------------------------------------------------------------------------
