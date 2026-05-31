@@ -266,8 +266,19 @@ def criar_tabelas() -> None:
             ("pdf_entregue",  "INTEGER DEFAULT 0"),
         ])
 
+        # Tabela: produtos
+        _add_columns(cur, conn, "produtos", [
+            ("tema",        "TEXT"),
+            ("dificuldade", "TEXT"),
+        ])
+
         conn.commit()
 
+    _upsert_topico(
+        "Caça-Palavras",
+        "caca-palavras",
+        "caca palavras idosos passatempo letras busca",
+    )
     seed_topicos()
 
 
@@ -332,6 +343,24 @@ def _seed_with_conn(conn) -> None:
         topicos,
     )
     conn.commit()
+
+
+def _upsert_topico(nome: str, slug: str, keywords: str) -> None:
+    """Insere tópico se o slug ainda não existe (idempotente)."""
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        if USE_POSTGRES:
+            cur.execute(
+                f"INSERT INTO topicos (nome, slug, keywords) VALUES ({PH}, {PH}, {PH}) "
+                f"ON CONFLICT (slug) DO NOTHING",
+                (nome, slug, keywords),
+            )
+        else:
+            cur.execute(
+                f"INSERT OR IGNORE INTO topicos (nome, slug, keywords) VALUES ({PH}, {PH}, {PH})",
+                (nome, slug, keywords),
+            )
+        conn.commit()
 
 
 def listar_topicos() -> list[dict]:
@@ -1066,6 +1095,20 @@ def criar_produto(nome: str, topico_id: int, serie: int = 1) -> int:
             f"INSERT INTO produtos (nome, serie, topico_id) VALUES ({PH}, {PH}, {PH})"
         )
         cur.execute(sql, (nome, serie, topico_id))
+        row_id = _lastrowid(cur, conn)
+        conn.commit()
+        return row_id
+
+
+def criar_produto_caca_palavras(nome: str, topico_id: int, tema: str, dificuldade: str) -> int:
+    """Cria produto de caça-palavras com tema e dificuldade."""
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        sql = _insert_returning(
+            f"INSERT INTO produtos (nome, topico_id, tema, dificuldade) "
+            f"VALUES ({PH}, {PH}, {PH}, {PH})"
+        )
+        cur.execute(sql, (nome, topico_id, tema, dificuldade))
         row_id = _lastrowid(cur, conn)
         conn.commit()
         return row_id
