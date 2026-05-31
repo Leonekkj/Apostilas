@@ -6,6 +6,8 @@ from typing import Optional
 from urllib.parse import urlencode
 
 import requests
+from dotenv import load_dotenv
+load_dotenv()
 
 # Importa database do diretório pai
 import sys
@@ -18,7 +20,7 @@ ML_CLIENT_SECRET = os.getenv("ML_CLIENT_SECRET", "")
 ML_REDIRECT_URI = os.getenv("ML_REDIRECT_URI", "http://localhost:8000/api/ml/callback")
 
 # Mercado Livre OAuth URLs
-ML_AUTH_URL = "https://auth.mercadolibre.com.br/authorization"
+ML_AUTH_URL = "https://auth.mercadolivre.com.br/authorization"
 ML_TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
 
 
@@ -31,8 +33,8 @@ def get_auth_url() -> str:
     """
     params = {
         "response_type": "code",
-        "client_id": ML_CLIENT_ID,
-        "redirect_uri": ML_REDIRECT_URI,
+        "client_id": os.getenv("ML_CLIENT_ID", ML_CLIENT_ID),
+        "redirect_uri": os.getenv("ML_REDIRECT_URI", ML_REDIRECT_URI).strip(),
     }
     query_string = urlencode(params)
     return f"{ML_AUTH_URL}?{query_string}"
@@ -51,12 +53,13 @@ def exchange_code(code: str) -> dict:
     Raises:
         RuntimeError: Se a API retornar um erro.
     """
+    redirect_uri = os.getenv("ML_REDIRECT_URI", ML_REDIRECT_URI).strip()
     payload = {
         "grant_type": "authorization_code",
-        "client_id": ML_CLIENT_ID,
-        "client_secret": ML_CLIENT_SECRET,
+        "client_id": os.getenv("ML_CLIENT_ID", ML_CLIENT_ID),
+        "client_secret": os.getenv("ML_CLIENT_SECRET", ML_CLIENT_SECRET),
         "code": code,
-        "redirect_uri": ML_REDIRECT_URI,
+        "redirect_uri": redirect_uri,
     }
 
     response = requests.post(ML_TOKEN_URL, data=payload)
