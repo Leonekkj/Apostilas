@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: cognivita-apostilas
+    runtime: python
+    buildCommand: pip install -r requirements.txt && playwright install chromium && playwright install-deps chromium
+    startCommand: python start.py
+    # Disco persistente para PDFs e imagens geradas (~$1/mês, 1GB)
+    disk:
+      name: output-files
+      mountPath: /opt/render/project/src/output
+      sizeGB: 1
+    envVars:
+      - key: ADMIN_TOKEN
+        sync: false          # preencher no dashboard do Render
+      - key: DATABASE_URL
+        sync: false          # URL do Neon (postgresql://...) — preencher no dashboard
+      - key: APP_URL
+        sync: false          # URL pública do Render ex: https://cognivita-apostilas.onrender.com
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DASHSCOPE_API_KEY
+        sync: false
+      - key: ML_CLIENT_ID
+        sync: false
+      - key: ML_CLIENT_SECRET
+        sync: false
+      - key: ML_REDIRECT_URI
+        sync: false          # ex: https://cognivita-apostilas.onrender.com/api/ml/callback
+      - key: ML_CATEGORIA_ID
+        value: MLB1227
+      - key: PORT
+        value: "8000"
