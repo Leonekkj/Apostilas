@@ -204,7 +204,7 @@ def _renderizar_grid(grid: list[list[str]], gabarito: list[list[str]] | None = N
 
 def _pagina_puzzle(puzzle: dict, numero: int, produto_nome: str, dificuldade: str) -> list:
     """Retorna lista de flowables ReportLab para uma página de puzzle."""
-    nivel_label = {"facil": "Fácil", "medio": "Médio", "dificil": "Difícil", "gigante": "Médio"}.get(dificuldade, "")
+    nivel_label = {"facil": "Fácil", "medio": "Médio", "dificil": "Difícil", "gigante": "Gigante"}.get(dificuldade, "")
 
     estilo_titulo = ParagraphStyle("titulo", fontName=FB, fontSize=13, textColor=C_BLUE,
                                    alignment=TA_CENTER, leading=16)
