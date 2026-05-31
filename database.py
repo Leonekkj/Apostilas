@@ -1124,7 +1124,7 @@ def listar_produtos_com_apostilas() -> list:
     with _get_conn() as conn:
         cur = _cursor(conn)
         cur.execute(
-            "SELECT p.*, tp.nome AS topico_nome FROM produtos p "
+            "SELECT p.*, tp.nome AS topico_nome, tp.slug AS topico_slug FROM produtos p "
             "LEFT JOIN topicos tp ON p.topico_id = tp.id ORDER BY p.id DESC"
         )
         produtos = _rows_to_dicts(cur.fetchall(), cur)

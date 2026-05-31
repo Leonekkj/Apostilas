@@ -105,7 +105,10 @@ def _require_auth(
 # ---------------------------------------------------------------------------
 
 _FATIAS = [30, 60, 90, 120, 150, 200]
+# Preços físicos (novos valores)
 _PRECOS_PRODUTO = {30: 69.90, 60: 79.90, 90: 89.90, 120: 99.90, 150: 109.90, 200: 119.90}
+# Preços digitais (mantidos nos valores anteriores)
+_PRECOS_DIGITAL = {30: 16.00, 60: 24.00, 90: 32.00, 120: 40.00, 150: 48.00, 200: 56.00}
 _PRECOS_CACA_PALAVRAS = {
     "facil":   14.90,
     "medio":   17.90,
@@ -359,7 +362,7 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             if len(titulo_base) > max_base:
                 titulo_base = titulo_base[:max_base].rsplit(" ", 1)[0]
             titulo_digital = (titulo_base + sufixo)[:60]
-            preco_digital = round(preco_fisico * 0.40, 2)
+            preco_digital = _PRECOS_DIGITAL.get(num_ex, round(preco_fisico * 0.40, 2))
             anuncio_digital_id = await asyncio.to_thread(
                 database.criar_anuncio,
                 apostila_id, "digital", posicao, titulo_digital, preco_digital, posicao, "", None, descricao_digital,
@@ -1099,7 +1102,13 @@ async def atualizar_precos_cognitivo(_auth=Depends(_require_auth)):
     novos_precos = _PRECOS_PRODUTO  # {30: 69.90, 60: 79.90, ...}
 
     anuncios = await asyncio.to_thread(database.listar_anuncios, status="publicado")
-    cognitivos = [a for a in anuncios if a.get("topico_slug") != "caca-palavras" and a.get("ml_id")]
+    # Apenas anúncios físicos cognitivos (digitais mantêm preço original)
+    cognitivos = [
+        a for a in anuncios
+        if a.get("topico_slug") != "caca-palavras"
+        and a.get("ml_id")
+        and a.get("tipo") == "fisico"
+    ]
 
     atualizados, erros = 0, []
     for a in cognitivos:
