@@ -582,7 +582,11 @@ def contar_anuncios_filtrado(
             params.append(apostila_id)
         cur.execute(sql, params)
         row = cur.fetchone()
-        return int(row[0]) if row else 0
+        if not row:
+            return 0
+        # RealDictCursor (PG) retorna dict; SQLite retorna tupla
+        val = list(row.values())[0] if isinstance(row, dict) else row[0]
+        return int(val) if val is not None else 0
 
 
 def buscar_anuncios_rascunho(limite: int = 30) -> list[dict]:
