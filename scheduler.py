@@ -4,6 +4,7 @@ scheduler.py — Publicação automática de anúncios no Mercado Livre.
 Roda 30 anúncios/dia, com 5 segundos de pausa entre cada publicação.
 Suporta --dry-run para testar sem publicar.
 """
+import gc
 import sys
 import time
 import argparse
@@ -112,7 +113,9 @@ def gerar_kits_automaticos():
         logger.info("Kits automáticos: menos de 2 tópicos disponíveis, pulando.")
         return
 
-    logger.info("Kits automáticos: %d tópicos, gerando combinações 2-4", len(topicos))
+    MAX_KITS_POR_EXECUCAO = 20  # limita geração por rodada para controlar memória
+    logger.info("Kits automáticos: %d tópicos, gerando combinações 2-4 (max %d/execução)",
+                len(topicos), MAX_KITS_POR_EXECUCAO)
     kits_criados = 0
     kits_pulados = 0
 
@@ -120,8 +123,10 @@ def gerar_kits_automaticos():
         if len(topicos) < r:
             continue
         for combo_topicos in itertools.combinations(topicos, r):
+            if kits_criados >= MAX_KITS_POR_EXECUCAO:
+                logger.info("Kits automáticos: limite de %d atingido, continuando amanhã.", MAX_KITS_POR_EXECUCAO)
+                break
             for num_ex in _FATIAS:
-                # Verifica se todas as apostilas existem para esse tamanho
                 apostila_ids = []
                 for topico_id in combo_topicos:
                     aid = mapa.get(topico_id, {}).get(num_ex)
@@ -133,7 +138,6 @@ def gerar_kits_automaticos():
                     kits_pulados += 1
                     continue
 
-                # Evita duplicatas
                 if database.kit_existe(apostila_ids):
                     kits_pulados += 1
                     continue
@@ -143,7 +147,6 @@ def gerar_kits_automaticos():
                     nome = gen_content.sugerir_nome_kit(apostilas_objs)
                     kit_id = database.criar_kit(nome, apostila_ids)
 
-                    # Preço: soma individual com 15% de desconto
                     preco_individual = _PRECOS_PRODUTO.get(num_ex, 29.90)
                     preco_kit = round(preco_individual * r * 0.85, 2)
 
@@ -151,11 +154,15 @@ def gerar_kits_automaticos():
                     titulos = gen_content.gerar_titulos_kit_ml(nome, apostilas_objs, total_exercicios)
                     descricao = gen_content.gerar_descricao_kit_ml(nome, apostilas_objs, total_exercicios)
 
-                    for i, title in enumerate(titulos, start=1):
-                        variacao_img = ((i - 1) % 3) + 1  # 1,2,3,1,2,3 para os 6 anúncios
-                        image_paths = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs, variacao_img)
-                        image_path = image_paths[0] if image_paths else None
+                    # Gera v1/v2/v3 uma única vez por kit — reutiliza para os 6 anúncios
+                    all_image_paths = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs)
 
+                    for i, title in enumerate(titulos, start=1):
+                        variacao_img = ((i - 1) % 3) + 1
+                        image_path = next(
+                            (p for p in all_image_paths if f"_v{variacao_img}.png" in p),
+                            all_image_paths[0] if all_image_paths else None,
+                        )
                         anuncio_id = database.criar_anuncio(
                             None, "fisico", i, title["titulo"], preco_kit,
                             i, title.get("angulo", ""), kit_id, descricao,
@@ -168,6 +175,9 @@ def gerar_kits_automaticos():
 
                 except Exception as e:
                     logger.error("Erro ao criar kit automático (%s, %d ex): %s", combo_topicos, num_ex, e)
+                finally:
+                    # Libera memória entre kits
+                    gc.collect()
 
     logger.info("Kits automáticos concluído: %d criados, %d pulados", kits_criados, kits_pulados)
 

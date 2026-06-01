@@ -1545,11 +1545,26 @@ def gerar_capas_kit(
 
     for v in variacoes:
         fname = OUTPUT_DIR / f"kit_{kit_id}_v{v}.png"
+        # Reutiliza imagem já gerada no disco — evita chamada AI desnecessária
+        if fname.exists() and fname.stat().st_size > 0:
+            paths.append(str(fname))
+            continue
         ai_entry = ai_images.get(v)
         ai_img, ai_src = ai_entry if ai_entry else (None, None)
         _gerar_capa(fname, v, kit_nome, badge, rodape1, rodape2,
                     ai_image=ai_img, ai_source=ai_src)
+        # Libera imagem AI da memória imediatamente após salvar
+        if ai_img is not None:
+            ai_img.close()
         paths.append(str(fname))
+
+    # Libera todas as imagens AI do dict
+    for entry in ai_images.values():
+        try:
+            entry[0].close()
+        except Exception:
+            pass
+    ai_images.clear()
 
     return paths
 
