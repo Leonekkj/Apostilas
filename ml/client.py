@@ -329,9 +329,13 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
         "listing_type_id": "gold_pro",
         "condition": "new",
         "attributes": [
-            {"id": "BRAND",    "value_name": "CogniVita"},
-            {"id": "AUTHOR",   "value_name": "CogniVita"},
-            {"id": "LANGUAGE", "value_name": "Português"},
+            {"id": "BRAND",                    "value_name": "CogniVita"},
+            {"id": "AUTHOR",                   "value_name": "CogniVita"},
+            {"id": "LANGUAGE",                 "value_name": "Português"},
+            # MLB1726 (Educação e Referência) — obrigatórios
+            {"id": "DEVELOPER",                "value_name": "CogniVita"},
+            {"id": "EDUCATIONAL_SOFTWARE_NAME","value_name": titulo},
+            {"id": "MODEL",                    "value_name": "Apostila Física Impressa"},
         ],
     }
 
