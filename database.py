@@ -897,6 +897,67 @@ def deletar_anuncios_por_kit(kit_id: int) -> list:
         return ml_ids
 
 
+def fix_precos_kits_db(desconto: float = 0.85) -> list[dict]:
+    """Recalcula e atualiza o preço de todos os anúncios de kit não publicados.
+
+    Para cada kit, soma o preço do anúncio físico mais barato de cada apostila
+    (ou usa 79.90 como fallback) e aplica o desconto. Retorna lista de alterações.
+    """
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+
+        # Busca todos os anúncios de kit não publicados com seus kit_ids
+        cur.execute("""
+            SELECT an.id, an.kit_id, an.preco, k.apostila_ids
+            FROM anuncios an
+            JOIN kits k ON an.kit_id = k.id
+            WHERE an.kit_id IS NOT NULL
+              AND (an.status IS NULL OR an.status NOT IN ('publicado', 'deletado'))
+        """)
+        rows = _rows_to_dicts(cur)
+
+        alteracoes = []
+        kits_preco: dict = {}
+
+        for row in rows:
+            kit_id = row["kit_id"]
+            if kit_id not in kits_preco:
+                try:
+                    apostila_ids = json.loads(row.get("apostila_ids") or "[]")
+                except Exception:
+                    apostila_ids = []
+
+                total = 0.0
+                for aid in apostila_ids:
+                    cur.execute(f"""
+                        SELECT preco FROM anuncios
+                        WHERE apostila_id = {PH} AND tipo = 'fisico'
+                          AND status NOT IN ('deletado')
+                        ORDER BY preco DESC LIMIT 1
+                    """, (aid,))
+                    r = cur.fetchone()
+                    total += float(r[0]) if r and r[0] else 79.90
+
+                kits_preco[kit_id] = round(total * desconto, 2)
+
+            novo_preco = kits_preco[kit_id]
+            preco_atual = float(row.get("preco") or 0)
+            if abs(preco_atual - novo_preco) > 0.01:
+                cur.execute(
+                    f"UPDATE anuncios SET preco = {PH} WHERE id = {PH}",
+                    (novo_preco, row["id"]),
+                )
+                alteracoes.append({
+                    "anuncio_id": row["id"],
+                    "kit_id": kit_id,
+                    "preco_antigo": preco_atual,
+                    "preco_novo": novo_preco,
+                })
+
+        conn.commit()
+        return alteracoes
+
+
 def deletar_kit(kit_id: int) -> None:
     """Hard-deletes a kit and its anuncio rows."""
     with _get_conn() as conn:

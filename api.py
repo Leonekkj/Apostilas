@@ -928,61 +928,9 @@ async def importar_do_ml(_auth=Depends(_require_auth)):
 
 @app.post("/api/admin/fix-precos-kits")
 async def fix_precos_kits(_auth=Depends(_require_auth)):
-    """Recalcula e corrige o preço de todos os anúncios de kit ainda não publicados.
-    Usa o preço real dos anúncios físicos existentes de cada apostila × 0.85."""
-    anuncios = await asyncio.to_thread(database.listar_anuncios, None, "fisico", None, None, None, 9999)
-    anuncios_kit = [a for a in anuncios if a.get("kit_id") and a.get("status") != "publicado"]
-
-    corrigidos = []
-    sem_apostilas = []
-
-    # Agrupa por kit_id para calcular o preço uma vez por kit
-    kits_preco: dict[int, float] = {}
-    for an in anuncios_kit:
-        kit_id = an["kit_id"]
-        if kit_id in kits_preco:
-            continue
-
-        kit = await asyncio.to_thread(database.buscar_kit, kit_id)
-        if not kit:
-            sem_apostilas.append(kit_id)
-            continue
-
-        apostila_ids = kit.get("apostila_ids_list", [])
-        if not apostila_ids:
-            sem_apostilas.append(kit_id)
-            continue
-
-        # Preço de cada apostila: anuncio fisico existente ou tabela retail
-        total = 0.0
-        for aid in apostila_ids:
-            ans = await asyncio.to_thread(database.listar_anuncios, None, "fisico", None, None, aid, 1)
-            if ans and ans[0].get("preco"):
-                total += float(ans[0]["preco"])
-            else:
-                ap = await asyncio.to_thread(database.buscar_apostila_por_id, aid)
-                num_ex = ap.get("num_exercicios", 60) if ap else 60
-                total += _PRECOS_PRODUTO.get(num_ex, 79.90)
-
-        kits_preco[kit_id] = round(total * 0.85, 2)
-
-    # Aplica o preço correto em cada anúncio
-    for an in anuncios_kit:
-        kit_id = an["kit_id"]
-        novo_preco = kits_preco.get(kit_id)
-        if novo_preco is None:
-            continue
-        preco_atual = float(an.get("preco") or 0)
-        if abs(preco_atual - novo_preco) > 0.01:
-            await asyncio.to_thread(database.atualizar_anuncio, an["id"], preco=novo_preco)
-            corrigidos.append({"anuncio_id": an["id"], "kit_id": kit_id,
-                                "preco_antigo": preco_atual, "preco_novo": novo_preco})
-
-    return {
-        "corrigidos": len(corrigidos),
-        "sem_apostilas": sem_apostilas,
-        "detalhes": corrigidos,
-    }
+    """Recalcula e corrige o preço de todos os anúncios de kit ainda não publicados."""
+    alteracoes = await asyncio.to_thread(database.fix_precos_kits_db)
+    return {"corrigidos": len(alteracoes), "detalhes": alteracoes}
 
 
 @app.post("/api/admin/ml/fix-categorias")
