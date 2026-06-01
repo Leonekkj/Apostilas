@@ -25,7 +25,7 @@ PAUSE_BETWEEN = 5  # seconds
 
 _FATIAS = [30, 60, 90, 120, 150, 200]
 # Preços físicos retail — idênticos aos da api.py para consistência
-_PRECOS_PRODUTO = {30: 69.90, 60: 79.90, 90: 89.90, 120: 99.90, 150: 109.90, 200: 119.90}
+_PRECOS_PRODUTO = {30: 59.99, 60: 69.99, 90: 79.99, 120: 89.99, 150: 99.99, 200: 139.99}
 
 _TEMAS_CP = ["geral", "futebol", "culinaria", "animais", "brasil", "musica", "natureza"]
 _CP_VOLUMES = [("facil", 60), ("medio", 60), ("dificil", 60), ("gigante", 300)]
@@ -34,11 +34,14 @@ _NIVEL_LABEL_CP = {"facil": "Fácil", "medio": "Médio", "dificil": "Difícil", 
 
 
 def _preco_apostila(apostila_id: int, num_exercicios: int) -> float:
-    """Retorna o preço real do anúncio físico existente, ou fallback da tabela."""
-    anuncios = database.listar_anuncios(None, "fisico", None, None, apostila_id, 1)
-    if anuncios and anuncios[0].get("preco"):
-        return float(anuncios[0]["preco"])
-    return _PRECOS_PRODUTO.get(num_exercicios, 79.90)
+    """Retorna o preço real do anúncio individual existente, ou fallback da tabela."""
+    # Busca qualquer tipo (fisico, importado) — anúncios importados do ML são a fonte mais confiável
+    anuncios = database.listar_anuncios(None, None, None, None, apostila_id, 10)
+    for an in anuncios:
+        p = float(an.get("preco") or 0)
+        if p > 50 and not an.get("kit_id"):
+            return p
+    return _PRECOS_PRODUTO.get(num_exercicios, 79.99)
 
 
 def _publicar_anuncios_kit(anuncio_ids: list, kit_nome: str = ""):

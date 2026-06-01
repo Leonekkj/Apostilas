@@ -105,8 +105,8 @@ def _require_auth(
 # ---------------------------------------------------------------------------
 
 _FATIAS = [30, 60, 90, 120, 150, 200]
-# Preços físicos (novos valores)
-_PRECOS_PRODUTO = {30: 69.90, 60: 79.90, 90: 89.90, 120: 99.90, 150: 109.90, 200: 119.90}
+# Preços físicos reais (verificados nos anúncios publicados no ML)
+_PRECOS_PRODUTO = {30: 59.99, 60: 69.99, 90: 79.99, 120: 89.99, 150: 99.99, 200: 139.99}
 # Preços digitais (mantidos nos valores anteriores)
 _PRECOS_DIGITAL = {30: 16.00, 60: 24.00, 90: 32.00, 120: 40.00, 150: 48.00, 200: 56.00}
 _PRECOS_CACA_PALAVRAS = {
@@ -627,12 +627,16 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
         # Preço: usa o preço real do anúncio físico existente de cada apostila.
         # Fallback para _PRECOS_PRODUTO quando a apostila ainda não tem anúncio.
         async def _preco_apostila(ap: dict) -> float:
+            # Busca qualquer tipo de anúncio (fisico, importado) ligado à apostila
             anuncios = await asyncio.to_thread(
-                database.listar_anuncios, None, "fisico", None, None, ap["id"], 1
+                database.listar_anuncios, None, None, None, None, ap["id"], 1
             )
-            if anuncios and anuncios[0].get("preco"):
-                return float(anuncios[0]["preco"])
-            return _PRECOS_PRODUTO.get(ap.get("num_exercicios", 60), 79.90)
+            # Filtra anúncios com preço real (>50) de apostila individual
+            for an in anuncios:
+                p = float(an.get("preco") or 0)
+                if p > 50 and not an.get("kit_id"):
+                    return p
+            return _PRECOS_PRODUTO.get(ap.get("num_exercicios", 60), 79.99)
 
         precos = await asyncio.gather(*[_preco_apostila(ap) for ap in apostilas])
         preco_individual = sum(precos)

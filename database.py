@@ -1005,12 +1005,14 @@ def fix_precos_kits_db(desconto: float = 0.85) -> list[dict]:
                 for aid in apostila_ids:
                     cur.execute(f"""
                         SELECT preco FROM anuncios
-                        WHERE apostila_id = {PH} AND tipo = 'fisico'
+                        WHERE apostila_id = {PH}
+                          AND tipo IN ('fisico', 'importado')
                           AND status NOT IN ('deletado')
+                          AND preco > 50
                         ORDER BY preco DESC LIMIT 1
                     """, (aid,))
                     r = cur.fetchone()
-                    total += float(r[0]) if r and r[0] else 79.90
+                    total += float(r[0]) if r and r[0] else 79.99
 
                 kits_preco[kit_id] = round(total * desconto, 2)
 
