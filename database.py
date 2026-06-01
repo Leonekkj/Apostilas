@@ -914,7 +914,7 @@ def fix_precos_kits_db(desconto: float = 0.85) -> list[dict]:
             WHERE an.kit_id IS NOT NULL
               AND (an.status IS NULL OR an.status NOT IN ('publicado', 'deletado'))
         """)
-        rows = _rows_to_dicts(cur)
+        rows = _rows_to_dicts(cur.fetchall(), cur)
 
         alteracoes = []
         kits_preco: dict = {}
