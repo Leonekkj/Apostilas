@@ -1006,16 +1006,29 @@ async def fix_caracteristicas_ml(_auth=Depends(_require_auth)):
             {"id": "VERSION",               "value_name": "1ª Edição"},
             {"id": "WITH_UNLIMITED_LICENSE","value_id": "242084", "value_name": "Não"},
         ]
-        r = await asyncio.to_thread(
-            lambda ml_id=an["ml_id"]: _req.put(
-                f"https://api.mercadolibre.com/items/{ml_id}",
-                json={"attributes": attrs},
-                headers=headers,
-                timeout=15,
-            )
-        )
+
+        async def _put(ml_id=an["ml_id"]):
+            for attempt in range(3):
+                r = await asyncio.to_thread(
+                    lambda: _req.put(
+                        f"https://api.mercadolibre.com/items/{ml_id}",
+                        json={"attributes": attrs},
+                        headers=headers,
+                        timeout=15,
+                    )
+                )
+                if r.status_code == 429:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return r
+            return r
+
+        r = await _put()
+        await asyncio.sleep(0.3)  # 3 req/s para não bater no rate limit
         if r.status_code == 200:
             atualizados.append(an["ml_id"])
+        elif "not_modifiable" in r.text:
+            pass  # atributo bloqueado pelo ML — não há o que fazer via API
         else:
             erros.append({"ml_id": an["ml_id"], "status": r.status_code, "detail": r.text[:200]})
 
