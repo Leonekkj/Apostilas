@@ -1054,6 +1054,57 @@ async def importar_do_ml(_auth=Depends(_require_auth)):
         raise HTTPException(status_code=503, detail=str(e))
 
 
+@app.post("/api/admin/fix-cp-tema-dificuldade")
+async def fix_cp_tema_dificuldade(_auth=Depends(_require_auth)):
+    """Backfill colunas tema/dificuldade em produtos CP que têm NULL (criados antes das colunas existirem)."""
+    _TEMA_MAP = {
+        "futebol": "futebol", "animais": "animais", "brasil": "brasil",
+        "música": "musica", "musica": "musica", "culinária": "culinaria",
+        "culinaria": "culinaria", "natureza": "natureza",
+    }
+    _DIF_MAP = {
+        "fácil": "facil", "facil": "facil",
+        "médio": "medio", "medio": "medio",
+        "difícil": "dificil", "dificil": "dificil",
+        "gigante": "gigante",
+    }
+
+    def _do_fix():
+        import re
+        with database._get_conn() as conn:
+            cur = database._cursor(conn)
+            cur.execute(
+                "SELECT p.id, p.nome FROM produtos p "
+                "JOIN topicos t ON p.topico_id = t.id "
+                "WHERE t.slug = 'caca-palavras' AND (p.tema IS NULL OR p.dificuldade IS NULL)"
+            )
+            rows = [database._row_to_dict(r, cur) if database.USE_POSTGRES else dict(r) for r in cur.fetchall()]
+            updated = []
+            for row in rows:
+                nome_lower = row["nome"].lower()
+                tema = "geral"
+                for k, v in _TEMA_MAP.items():
+                    if k in nome_lower:
+                        tema = v
+                        break
+                dif = None
+                for k, v in _DIF_MAP.items():
+                    if k in nome_lower:
+                        dif = v
+                        break
+                if dif:
+                    cur.execute(
+                        f"UPDATE produtos SET tema = {database.PH}, dificuldade = {database.PH} WHERE id = {database.PH}",
+                        (tema, dif, row["id"])
+                    )
+                    updated.append({"id": row["id"], "nome": row["nome"], "tema": tema, "dificuldade": dif})
+            conn.commit()
+            return updated
+
+    result = await asyncio.to_thread(_do_fix)
+    return {"corrigidos": len(result), "detalhes": result}
+
+
 @app.post("/api/admin/fix-precos-kits")
 async def fix_precos_kits(_auth=Depends(_require_auth)):
     """Recalcula e corrige o preço de todos os anúncios de kit ainda não publicados."""
