@@ -1116,6 +1116,81 @@ async def fix_precos_kits(_auth=Depends(_require_auth)):
     return {"corrigidos": len(alteracoes), "detalhes": alteracoes}
 
 
+@app.post("/api/admin/fix-precos-kits-ml")
+async def fix_precos_kits_ml(background_tasks: BackgroundTasks, _auth=Depends(_require_auth)):
+    """Recalcula preços de TODOS os kits (incluindo publicados) e atualiza no ML.
+    Roda em background — retorna imediatamente."""
+
+    async def _run():
+        import json as _json
+        import time as _time
+
+        # 1. Busca todos os anúncios de kit (qualquer status exceto deletado)
+        with database._get_conn() as conn:
+            cur = database._cursor(conn)
+            cur.execute("""
+                SELECT an.id, an.kit_id, an.preco, an.ml_id, an.status, k.apostila_ids
+                FROM anuncios an
+                JOIN kits k ON an.kit_id = k.id
+                WHERE an.kit_id IS NOT NULL AND (an.status IS NULL OR an.status != 'deletado')
+            """)
+            rows = database._rows_to_dicts(cur.fetchall(), cur)
+
+        # 2. Calcula preço correto por kit (cache para não repetir o cálculo)
+        kits_preco: dict = {}
+        for row in rows:
+            kit_id = row["kit_id"]
+            if kit_id not in kits_preco:
+                try:
+                    apostila_ids = _json.loads(row.get("apostila_ids") or "[]")
+                except Exception:
+                    apostila_ids = []
+                total = 0.0
+                for aid in apostila_ids:
+                    ap = await asyncio.to_thread(database.buscar_apostila_por_id, aid)
+                    num_ex = (ap or {}).get("num_exercicios", 60)
+                    # Busca preço real do anúncio individual
+                    ans = await asyncio.to_thread(
+                        database.listar_anuncios, None, None, None, None, aid, 10
+                    )
+                    preco_ap = next(
+                        (float(a["preco"]) for a in ans if float(a.get("preco") or 0) > 50 and not a.get("kit_id")),
+                        _PRECOS_PRODUTO.get(num_ex, 79.99)
+                    )
+                    total += preco_ap
+                kits_preco[kit_id] = round(total * 0.85, 2)
+
+        # 3. Atualiza DB e ML para cada anúncio com preço diferente
+        corrigidos_db = 0
+        corrigidos_ml = 0
+        erros = []
+        for row in rows:
+            novo_preco = kits_preco.get(row["kit_id"])
+            if novo_preco is None:
+                continue
+            preco_atual = float(row.get("preco") or 0)
+            if abs(preco_atual - novo_preco) < 0.01:
+                continue
+
+            # Atualiza DB
+            await asyncio.to_thread(database.atualizar_anuncio, row["id"], preco=novo_preco)
+            corrigidos_db += 1
+
+            # Atualiza ML se publicado
+            if row.get("ml_id") and row.get("status") == "publicado":
+                try:
+                    await asyncio.to_thread(ml_client.atualizar_preco_ml, row["ml_id"], novo_preco)
+                    corrigidos_ml += 1
+                except Exception as e:
+                    erros.append({"anuncio_id": row["id"], "ml_id": row["ml_id"], "erro": str(e)})
+                await asyncio.sleep(0.3)
+
+        print(f"[fix-precos-kits-ml] DB={corrigidos_db} ML={corrigidos_ml} erros={len(erros)}")
+
+    background_tasks.add_task(_run)
+    return {"ok": True, "msg": "Correção de preços iniciada em background (DB + ML)"}
+
+
 @app.post("/api/admin/gerar-caca-palavras")
 async def admin_gerar_caca_palavras(_auth=Depends(_require_auth)):
     """Cria caça-palavras para todos os temas ainda não existentes."""
