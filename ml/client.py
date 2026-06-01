@@ -19,9 +19,10 @@ ML_API_BASE = "https://api.mercadolibre.com"
 ML_PICTURES_ENDPOINT = f"{ML_API_BASE}/pictures"
 ML_ITEMS_ENDPOINT = f"{ML_API_BASE}/items"
 
-# MLB455868 = Ebooks        — NUNCA usar: exclusão automática por PI
-# MLB437616 = Livros Físicos — exige GTIN (ISBN) e BOOK_TITLE que apostilas autorais não têm
-_CATS_BLOQUEADAS = {"MLB455868", "MLB437616"}
+# MLB455868 = Ebooks           — exclusão automática por PI
+# MLB437616 = Livros Físicos   — exige GTIN/ISBN que apostilas autorais não têm
+# MLB445795 = Cursos Completos — ML desativa por "categoria incorreta" (fica em Música/Filmes)
+_CATS_BLOQUEADAS = {"MLB455868", "MLB437616", "MLB445795"}
 
 # MLB1726 = Educação e Referência (Informática > Softwares) — aceito pelo ML para apostilas físicas, sem GTIN
 # MLB1227 = Outros (Livros, Revistas e Comics) — seguro para digitais sem Ebooks
