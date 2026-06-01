@@ -111,8 +111,9 @@ def publicar_anuncio(anuncio_id: int) -> str:
         imagem_path = anuncio.get("imagem_path") or ""
         print(f"[ML] publicar_anuncio #{anuncio_id}: imagem_path={imagem_path!r}")
 
-        # Se não tiver imagem ainda, gera on-demand
-        if not imagem_path and anuncio.get("apostila_id"):
+        # Se não tiver imagem ou o arquivo não existir mais no disco (filesystem efêmero), gera on-demand
+        imagem_ausente = not imagem_path or not os.path.exists(imagem_path)
+        if imagem_ausente and anuncio.get("apostila_id"):
             try:
                 from generator import images as _gen_images
                 topico_dict = {
@@ -132,7 +133,7 @@ def publicar_anuncio(anuncio_id: int) -> str:
             except Exception as _e:
                 print(f"[ML] falha ao gerar imagem on-demand: {_e}")
 
-        elif not imagem_path and anuncio.get("kit_id"):
+        elif imagem_ausente and anuncio.get("kit_id"):
             try:
                 from generator import images as _gen_images
                 kit_id = anuncio["kit_id"]
