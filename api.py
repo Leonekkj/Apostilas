@@ -982,6 +982,46 @@ async def fix_precos_kits(_auth=Depends(_require_auth)):
     return {"corrigidos": len(alteracoes), "detalhes": alteracoes}
 
 
+@app.post("/api/admin/ml/fix-caracteristicas")
+async def fix_caracteristicas_ml(_auth=Depends(_require_auth)):
+    """Atualiza FORMAT, VERSION e WITH_UNLIMITED_LICENSE em todos os anúncios publicados no ML."""
+    from ml import auth as ml_auth
+    import requests as _req
+
+    try:
+        token = await asyncio.to_thread(ml_auth.get_valid_token)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    anuncios = await asyncio.to_thread(database.listar_anuncios, "publicado", None, None, None, None, 9999, 0)
+    anuncios_ml = [a for a in anuncios if a.get("ml_id")]
+
+    atualizados, erros = [], []
+    for an in anuncios_ml:
+        is_digital = an.get("tipo") == "digital"
+        attrs = [
+            {"id": "FORMAT", "value_id": "2132699" if is_digital else "2431740",
+             "value_name": "Digital" if is_digital else "Físico"},
+            {"id": "VERSION",               "value_name": "1ª Edição"},
+            {"id": "WITH_UNLIMITED_LICENSE","value_id": "242084", "value_name": "Não"},
+        ]
+        r = await asyncio.to_thread(
+            lambda ml_id=an["ml_id"]: _req.put(
+                f"https://api.mercadolibre.com/items/{ml_id}",
+                json={"attributes": attrs},
+                headers=headers,
+                timeout=15,
+            )
+        )
+        if r.status_code == 200:
+            atualizados.append(an["ml_id"])
+        else:
+            erros.append({"ml_id": an["ml_id"], "status": r.status_code, "detail": r.text[:200]})
+
+    return {"atualizados": len(atualizados), "erros": len(erros), "detalhes_erros": erros}
+
+
 @app.post("/api/admin/ml/fix-categorias")
 async def fix_categorias_ml(_auth=Depends(_require_auth)):
     """Atualiza a categoria de todos os anúncios publicados no ML para a categoria correta
