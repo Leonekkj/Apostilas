@@ -564,11 +564,21 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
         # Create kit record
         kit_id = await asyncio.to_thread(database.criar_kit, nome, body.apostila_ids)
 
-        # Total exercicios for pricing
+        # Total exercicios for pricing and titles
         total_exercicios = sum(ap.get("num_exercicios", 0) for ap in apostilas)
 
-        # Individual price sum * 0.85 discount
-        preco_individual = sum(_get_preco(ap.get("num_exercicios", 60)) for ap in apostilas)
+        # Preço: usa o preço real do anúncio físico existente de cada apostila.
+        # Fallback para _PRECOS_PRODUTO quando a apostila ainda não tem anúncio.
+        async def _preco_apostila(ap: dict) -> float:
+            anuncios = await asyncio.to_thread(
+                database.listar_anuncios, None, "fisico", None, None, ap["id"], 1
+            )
+            if anuncios and anuncios[0].get("preco"):
+                return float(anuncios[0]["preco"])
+            return _PRECOS_PRODUTO.get(ap.get("num_exercicios", 60), 79.90)
+
+        precos = await asyncio.gather(*[_preco_apostila(ap) for ap in apostilas])
+        preco_individual = sum(precos)
         preco_kit = round(preco_individual * 0.85, 2)
 
         # Generate 6 ML titles + description for kit

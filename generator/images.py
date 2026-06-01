@@ -1446,31 +1446,39 @@ def gerar_capas(
     return paths
 
 
-def _build_kit_ai_prompts(apostilas_info: list[dict], num_exercicios: int) -> dict:
-    """Gera prompts para capa de kit com N livros, cada um com seu título específico.
+def _build_kit_ai_prompts(apostilas_info: list[dict], num_exercicios_total: int) -> dict:
+    """Gera prompts para capa de kit com N livros, cada um com seu título e contagem próprios.
 
-    apostilas_info: lista de dicts com chave 'nome' (topico_nome de cada apostila).
+    apostilas_info: lista de dicts com chave 'nome' e 'num_exercicios' de cada apostila.
     Retorna {1: prompt_v1, 2: prompt_v2, 3: prompt_v3}.
     """
     import random
     n = len(apostilas_info)
-    ex = f"{num_exercicios} EXERCICIOS"
     ambiente_v1 = random.choice(_AMBIENTES_V1)
     ambiente_v2 = random.choice(_AMBIENTES_V2)
     ambiente_v3 = random.choice(_AMBIENTES_V3)
 
     posicoes = ["First", "Second", "Third", "Fourth"]
+    # Cores distintas por livro para diferenciá-los visualmente
+    _BOOK_COLORS = [
+        ("dark forest green", "warm cream"),
+        ("deep navy blue", "ivory white"),
+        ("rich burgundy red", "off-white"),
+        ("dark teal", "pale linen"),
+    ]
 
-    def _book_desc(i: int, nome: str) -> str:
-        titulo = nome.upper()
+    def _book_desc(i: int, info: dict) -> str:
+        titulo = info["nome"].upper()
+        num_ex = info.get("num_exercicios", 60)
+        dark_color, light_color = _BOOK_COLORS[i % len(_BOOK_COLORS)]
         return (
-            f"{posicoes[i]} book cover: warm cream background with dark forest green watercolor shapes, "
-            f"brand COGNIVITA in small bold dark green at top, "
-            f"large bold title \"{titulo}\" centered in dark forest green, "
-            f"badge \"{ex}\" at bottom, gold spiral binding on left."
+            f"{posicoes[i]} book cover: {light_color} background with {dark_color} watercolor shapes, "
+            f"brand COGNIVITA in small bold {dark_color} at top, "
+            f"large bold title \"{titulo}\" centered in {dark_color}, "
+            f"badge \"{num_ex} EX\" at bottom, gold spiral binding on left."
         )
 
-    books_desc = " ".join(_book_desc(i, a["nome"]) for i, a in enumerate(apostilas_info))
+    books_desc = " ".join(_book_desc(i, a) for i, a in enumerate(apostilas_info))
 
     if n == 2:
         arrangement_v1 = "two thick spiral-bound workbooks standing upright side by side, covers facing the camera, slight angle between them"
@@ -1524,7 +1532,13 @@ def gerar_capas_kit(
     rodape2 = "Apostilas Físicas · Para Idosos 60+"
 
     variacoes = [variacao] if variacao is not None else [1, 2, 3]
-    apostilas_info = [{"nome": a.get("topico_nome", a.get("nome", kit_nome))} for a in apostilas]
+    apostilas_info = [
+        {
+            "nome": a.get("topico_nome", a.get("nome", kit_nome)),
+            "num_exercicios": a.get("num_exercicios", 60),
+        }
+        for a in apostilas
+    ]
     prompts = _build_kit_ai_prompts(apostilas_info, total_exercicios)
     ai_images = _fetch_ai_images_for_variacoes(variacoes, prompts)
     paths = []
