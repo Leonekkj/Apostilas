@@ -24,7 +24,16 @@ DAILY_LIMIT = 30
 PAUSE_BETWEEN = 5  # seconds
 
 _FATIAS = [30, 60, 90, 120, 150, 200]
-_PRECOS_PRODUTO = {30: 14.90, 60: 19.90, 90: 24.90, 120: 29.90, 150: 34.90, 200: 44.90}
+# Preços físicos retail — idênticos aos da api.py para consistência
+_PRECOS_PRODUTO = {30: 69.90, 60: 79.90, 90: 89.90, 120: 99.90, 150: 109.90, 200: 119.90}
+
+
+def _preco_apostila(apostila_id: int, num_exercicios: int) -> float:
+    """Retorna o preço real do anúncio físico existente, ou fallback da tabela."""
+    anuncios = database.listar_anuncios(None, "fisico", None, None, apostila_id, 1)
+    if anuncios and anuncios[0].get("preco"):
+        return float(anuncios[0]["preco"])
+    return _PRECOS_PRODUTO.get(num_exercicios, 79.90)
 
 
 def publicar_batch():
@@ -147,8 +156,10 @@ def gerar_kits_automaticos():
                     nome = gen_content.sugerir_nome_kit(apostilas_objs)
                     kit_id = database.criar_kit(nome, apostila_ids)
 
-                    preco_individual = _PRECOS_PRODUTO.get(num_ex, 29.90)
-                    preco_kit = round(preco_individual * r * 0.85, 2)
+                    preco_individual = sum(
+                        _preco_apostila(aid, num_ex) for aid in apostila_ids
+                    )
+                    preco_kit = round(preco_individual * 0.85, 2)
 
                     total_exercicios = num_ex * r
                     titulos = gen_content.gerar_titulos_kit_ml(nome, apostilas_objs, total_exercicios)
