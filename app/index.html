@@ -1291,6 +1291,10 @@ let TOKEN = localStorage.getItem('admin_token') || '';
 let _allAnuncios = [];
 let _todasApostilas = [];
 let _activeStatusFilter = '';
+let _anunciosPage = 1;
+let _anunciosTotalPages = 1;
+let _anunciosTotal = 0;
+const _ANUNCIOS_PER_PAGE = 50;
 let _produtos = [];
 let _kits = [];
 let _mlAuthUrl = null;
@@ -1781,29 +1785,70 @@ async function loadApostilas() {
   } catch (_) {}
 }
 
-async function loadAnuncios() {
+async function loadAnuncios(page) {
+  if (page !== undefined) _anunciosPage = page;
   const tbody = document.getElementById('anuncios-tbody');
   tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;"><div class="spinner-page"></div></td></tr>';
   try {
-    const url = _activeStatusFilter ? `/api/anuncios?status=${_activeStatusFilter}` : '/api/anuncios';
+    let url = `/api/anuncios?page=${_anunciosPage}&per_page=${_ANUNCIOS_PER_PAGE}`;
+    if (_activeStatusFilter) url += `&status=${_activeStatusFilter}`;
     const res = await apiFetch(url);
     if (!res.ok) {
       if (res.status === 401) { showTokenModal(); return; }
       throw new Error(`HTTP ${res.status}`);
     }
-    _allAnuncios = await res.json();
+    const data = await res.json();
+    _allAnuncios = data.items || data;
+    _anunciosTotal = data.total || _allAnuncios.length;
+    _anunciosTotalPages = data.pages || 1;
+    _anunciosPage = data.page || _anunciosPage;
     await loadApostilas();
     filterAnuncios();
+    renderPaginacaoAnuncios();
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--error);">Erro ao carregar anúncios: ${e.message}</td></tr>`;
   }
+}
+
+function renderPaginacaoAnuncios() {
+  let el = document.getElementById('anuncios-paginacao');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'anuncios-paginacao';
+    el.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;padding:16px 0;flex-wrap:wrap;';
+    document.querySelector('#tab-anuncios .page-content').appendChild(el);
+  }
+  if (_anunciosTotalPages <= 1) { el.innerHTML = ''; return; }
+
+  const p = _anunciosPage, total = _anunciosTotalPages;
+  const btn = (label, pg, disabled) =>
+    `<button onclick="loadAnuncios(${pg})"
+      style="padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:${pg===p?'var(--primary)':'var(--surface)'};color:${pg===p?'#fff':'var(--text)'};cursor:${disabled?'default':'pointer'};opacity:${disabled?0.4:1};font-size:13px;"
+      ${disabled?'disabled':''}>
+      ${label}
+    </button>`;
+
+  let pages = '';
+  for (let i = 1; i <= total; i++) {
+    if (i === 1 || i === total || (i >= p - 2 && i <= p + 2)) {
+      pages += btn(i, i, i === p);
+    } else if (i === p - 3 || i === p + 3) {
+      pages += `<span style="color:var(--muted)">…</span>`;
+    }
+  }
+
+  el.innerHTML =
+    btn('‹ Anterior', p - 1, p === 1) +
+    pages +
+    btn('Próxima ›', p + 1, p === total) +
+    `<span style="font-size:12px;color:var(--muted);margin-left:8px;">${_anunciosTotal} anúncios · pág. ${p}/${total}</span>`;
 }
 
 function setStatusFilter(btn, status) {
   document.querySelectorAll('#status-filters .filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   _activeStatusFilter = status;
-  loadAnuncios();
+  loadAnuncios(1);
 }
 
 function filterAnuncios() {

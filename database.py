@@ -547,6 +547,44 @@ def listar_anuncios(
         return _rows_to_dicts(cur.fetchall(), cur)
 
 
+def contar_anuncios(
+    status: Optional[str] = None,
+    tipo: Optional[str] = None,
+    topico_id: Optional[int] = None,
+    kit_id: Optional[int] = None,
+    apostila_id: Optional[int] = None,
+) -> int:
+    """Conta anúncios com os mesmos filtros de listar_anuncios."""
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        sql = """
+            SELECT COUNT(*) FROM anuncios an
+            LEFT JOIN apostilas ap ON an.apostila_id = ap.id
+            WHERE 1=1
+        """
+        params = []
+        if status is not None:
+            sql += f" AND an.status = {PH}"
+            params.append(status)
+        else:
+            sql += " AND an.status != 'deletado'"
+        if tipo is not None:
+            sql += f" AND an.tipo = {PH}"
+            params.append(tipo)
+        if topico_id is not None:
+            sql += f" AND ap.topico_id = {PH}"
+            params.append(topico_id)
+        if kit_id is not None:
+            sql += f" AND an.kit_id = {PH}"
+            params.append(kit_id)
+        if apostila_id is not None:
+            sql += f" AND an.apostila_id = {PH}"
+            params.append(apostila_id)
+        cur.execute(sql, params)
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+
 def buscar_anuncios_rascunho(limite: int = 30) -> list[dict]:
     """Retorna até `limite` anúncios com status='rascunho', incluindo dados da apostila."""
     return listar_anuncios(status="rascunho", limite=limite)

@@ -641,19 +641,26 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
 async def listar_anuncios(
     status: Optional[str] = None,
     apostila_id: Optional[int] = None,
+    page: int = 1,
+    per_page: int = 50,
     _auth=Depends(_require_auth),
 ):
-    anuncios = await asyncio.to_thread(
-        database.listar_anuncios,
-        status,       # status filter
-        None,         # tipo
-        None,         # topico_id
-        None,         # kit_id
-        apostila_id,  # apostila_id filter
-        200,          # limite
-        0,            # offset
+    page = max(1, page)
+    per_page = min(max(1, per_page), 200)
+    offset = (page - 1) * per_page
+
+    anuncios, total = await asyncio.gather(
+        asyncio.to_thread(database.listar_anuncios, status, None, None, None, apostila_id, per_page, offset),
+        asyncio.to_thread(database.contar_anuncios, status, None, None, None, apostila_id),
     )
-    return anuncios
+    import math
+    return {
+        "items": anuncios,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": max(1, math.ceil(total / per_page)),
+    }
 
 
 @app.post("/api/anuncios/{anuncio_id}/publicar")
@@ -681,6 +688,39 @@ async def publicar_lote(_auth=Depends(_require_auth)):
     return {
         "publicados": len([r for r in results if r["status"] == "publicado"]),
         "resultados": results
+    }
+
+
+@app.post("/api/admin/publicar-kits")
+async def publicar_kits(_auth=Depends(_require_auth), limite: int = 30):
+    """Publica até `limite` anúncios de kit com status rascunho/erro.
+    Gera imagens on-demand se necessário. Pausa 5s entre publicações."""
+    anuncios = await asyncio.to_thread(
+        database.listar_anuncios, "rascunho", "fisico", None, None, None, limite, 0
+    )
+    kit_anuncios = [a for a in anuncios if a.get("kit_id")]
+
+    # Complementa com anuncios de kit com status erro
+    if len(kit_anuncios) < limite:
+        erros = await asyncio.to_thread(
+            database.listar_anuncios, "erro", "fisico", None, None, None, limite - len(kit_anuncios), 0
+        )
+        kit_anuncios += [a for a in erros if a.get("kit_id")]
+
+    results = []
+    for anuncio in kit_anuncios:
+        try:
+            ml_id = await asyncio.to_thread(ml_client.publicar_anuncio, anuncio["id"])
+            results.append({"id": anuncio["id"], "kit_id": anuncio["kit_id"], "ml_id": ml_id, "status": "publicado"})
+        except RuntimeError as e:
+            results.append({"id": anuncio["id"], "kit_id": anuncio["kit_id"], "error": str(e), "status": "erro"})
+        await asyncio.sleep(5)
+
+    return {
+        "total": len(kit_anuncios),
+        "publicados": len([r for r in results if r["status"] == "publicado"]),
+        "erros": len([r for r in results if r["status"] == "erro"]),
+        "resultados": results,
     }
 
 
