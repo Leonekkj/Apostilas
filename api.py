@@ -983,7 +983,7 @@ async def fix_precos_kits(_auth=Depends(_require_auth)):
 
 
 @app.post("/api/admin/ml/fix-caracteristicas")
-async def fix_caracteristicas_ml(_auth=Depends(_require_auth)):
+async def fix_caracteristicas_ml(_auth=Depends(_require_auth), limite: int = 80, offset: int = 0):
     """Atualiza FORMAT, VERSION e WITH_UNLIMITED_LICENSE em todos os anúncios publicados no ML."""
     from ml import auth as ml_auth
     import requests as _req
@@ -994,7 +994,7 @@ async def fix_caracteristicas_ml(_auth=Depends(_require_auth)):
         raise HTTPException(status_code=503, detail=str(e))
 
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    anuncios = await asyncio.to_thread(database.listar_anuncios, "publicado", None, None, None, None, 9999, 0)
+    anuncios = await asyncio.to_thread(database.listar_anuncios, "publicado", None, None, None, None, limite, offset)
     anuncios_ml = [a for a in anuncios if a.get("ml_id")]
 
     atualizados, erros = [], []
@@ -1032,7 +1032,7 @@ async def fix_caracteristicas_ml(_auth=Depends(_require_auth)):
         else:
             erros.append({"ml_id": an["ml_id"], "status": r.status_code, "detail": r.text[:200]})
 
-    return {"atualizados": len(atualizados), "erros": len(erros), "detalhes_erros": erros}
+    return {"atualizados": len(atualizados), "erros": len(erros), "proximo_offset": offset + limite, "detalhes_erros": erros}
 
 
 @app.post("/api/admin/ml/fix-categorias")
