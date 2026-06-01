@@ -141,16 +141,29 @@ def publicar_anuncio(anuncio_id: int) -> str:
                     apostila_ids = kit.get("apostila_ids_list", [])
                     apostilas = [database.buscar_apostila_por_id(aid) for aid in apostila_ids]
                     apostilas = [a for a in apostilas if a]
-                    variacao = ((anuncio.get("variacao", 1) - 1) % 3) + 1
                     kit_nome = kit.get("nome", anuncio.get("kit_nome", "Kit"))
-                    print(f"[ML] gerando imagem kit on-demand: kit_id={kit_id} variacao={variacao}")
-                    paths = _gen_images.gerar_capas_kit(kit_id, kit_nome, apostilas, variacao)
-                    if paths:
-                        imagem_path = paths[0]
-                        database.atualizar_anuncio(anuncio_id, imagem_path=imagem_path)
-                        print(f"[ML] imagem kit gerada: {imagem_path}")
-                    else:
-                        print("[ML] gerar_capas_kit retornou lista vazia")
+                    variacao_este = ((anuncio.get("variacao", 1) - 1) % 3) + 1
+
+                    # Gera v1, v2 e v3 de uma vez — os outros anúncios do mesmo kit
+                    # já encontrarão as imagens no disco e não precisarão regerar.
+                    print(f"[ML] gerando imagens kit on-demand v1/v2/v3: kit_id={kit_id}")
+                    all_paths = _gen_images.gerar_capas_kit(kit_id, kit_nome, apostilas)  # sem variacao= gera as 3
+                    # Salva cada variacao no anuncio correspondente do mesmo kit
+                    kit_anuncios = database.listar_anuncios(kit_id=kit_id, limite=999)
+                    for ka in kit_anuncios:
+                        v = ((ka.get("variacao", 1) - 1) % 3) + 1
+                        for p in all_paths:
+                            if f"_v{v}.png" in p:
+                                database.atualizar_anuncio(ka["id"], imagem_path=p)
+                                break
+                    # Imagem deste anúncio
+                    for p in all_paths:
+                        if f"_v{variacao_este}.png" in p:
+                            imagem_path = p
+                            break
+                    if not imagem_path and all_paths:
+                        imagem_path = all_paths[0]
+                    print(f"[ML] imagens kit geradas: {all_paths}")
             except Exception as _e:
                 print(f"[ML] falha ao gerar imagem kit on-demand: {_e}")
 
