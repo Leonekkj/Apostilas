@@ -19,9 +19,12 @@ ML_API_BASE = "https://api.mercadolibre.com"
 ML_PICTURES_ENDPOINT = f"{ML_API_BASE}/pictures"
 ML_ITEMS_ENDPOINT = f"{ML_API_BASE}/items"
 
-# MLB455868 = Ebooks — NUNCA usar: conta pode ser desativada por PI/exclusão automática
-_CATS_BLOQUEADAS = {"MLB455868"}
+# MLB455868 = Ebooks        — NUNCA usar: exclusão automática por PI
+# MLB437616 = Livros Físicos — exige GTIN (ISBN) e BOOK_TITLE que apostilas autorais não têm
+_CATS_BLOQUEADAS = {"MLB455868", "MLB437616"}
 
+# MLB1726 = Educação e Referência (Informática > Softwares) — aceito pelo ML para apostilas físicas, sem GTIN
+# MLB1227 = Outros (Livros, Revistas e Comics) — seguro para digitais sem Ebooks
 _FALLBACK_DIG = os.getenv("ML_CATEGORIA_DIGITAL_ID", "MLB1227")
 _FALLBACK_FIS = os.getenv("ML_CATEGORIA_FISICO_ID",  "MLB1726")
 # Legado: ML_CATEGORIA_ID sobrescreve tudo
