@@ -1128,6 +1128,14 @@ async def admin_gerar_kits_caca_palavras(_auth=Depends(_require_auth)):
     return {"ok": True}
 
 
+@app.get("/api/admin/debug-cp-mapa")
+async def debug_cp_mapa(_auth=Depends(_require_auth)):
+    """Retorna o mapa {dificuldade: {tema: apostila_id}} usado para criar kits CP."""
+    mapa = await asyncio.to_thread(database.listar_apostilas_caca_palavras_por_dificuldade)
+    summary = {dif: list(temas.keys()) for dif, temas in mapa.items()}
+    return {"mapa_summary": summary, "mapa_full": mapa}
+
+
 @app.post("/api/admin/ml/fix-caracteristicas")
 async def fix_caracteristicas_ml(_auth=Depends(_require_auth), limite: int = 80, offset: int = 0):
     """Atualiza FORMAT, VERSION e WITH_UNLIMITED_LICENSE em todos os anúncios publicados no ML."""
