@@ -547,7 +547,7 @@ def listar_anuncios(
         return _rows_to_dicts(cur.fetchall(), cur)
 
 
-def contar_anuncios(
+def contar_anuncios_filtrado(
     status: Optional[str] = None,
     tipo: Optional[str] = None,
     topico_id: Optional[int] = None,

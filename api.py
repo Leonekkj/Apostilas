@@ -651,7 +651,7 @@ async def listar_anuncios(
 
     anuncios, total = await asyncio.gather(
         asyncio.to_thread(database.listar_anuncios, status, None, None, None, apostila_id, per_page, offset),
-        asyncio.to_thread(database.contar_anuncios, status, None, None, None, apostila_id),
+        asyncio.to_thread(database.contar_anuncios_filtrado, status, None, None, None, apostila_id),
     )
     import math
     return {
@@ -700,12 +700,21 @@ async def publicar_kits(_auth=Depends(_require_auth), limite: int = 30):
     )
     kit_anuncios = [a for a in anuncios if a.get("kit_id")]
 
-    # Complementa com anuncios de kit com status erro
+    # Complementa com anuncios de kit com status erro, exceto os com validation_error
+    # (esses precisam de correção manual, não de re-tentativa infinita)
     if len(kit_anuncios) < limite:
         erros = await asyncio.to_thread(
-            database.listar_anuncios, "erro", "fisico", None, None, None, limite - len(kit_anuncios), 0
+            database.listar_anuncios, "erro", "fisico", None, None, None, limite * 3, 0
         )
-        kit_anuncios += [a for a in erros if a.get("kit_id")]
+        for a in erros:
+            if not a.get("kit_id"):
+                continue
+            erro_msg = a.get("erro_msg") or ""
+            if "validation_error" in erro_msg:
+                continue
+            kit_anuncios.append(a)
+            if len(kit_anuncios) >= limite:
+                break
 
     results = []
     for anuncio in kit_anuncios:
