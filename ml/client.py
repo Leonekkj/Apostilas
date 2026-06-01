@@ -111,7 +111,7 @@ def publicar_anuncio(anuncio_id: int) -> str:
         imagem_path = anuncio.get("imagem_path") or ""
         print(f"[ML] publicar_anuncio #{anuncio_id}: imagem_path={imagem_path!r}")
 
-        # Se não tiver imagem ainda, gera on-demand (igual ao fluxo de criação)
+        # Se não tiver imagem ainda, gera on-demand
         if not imagem_path and anuncio.get("apostila_id"):
             try:
                 from generator import images as _gen_images
@@ -131,6 +131,28 @@ def publicar_anuncio(anuncio_id: int) -> str:
                     print("[ML] gerar_capas retornou lista vazia")
             except Exception as _e:
                 print(f"[ML] falha ao gerar imagem on-demand: {_e}")
+
+        elif not imagem_path and anuncio.get("kit_id"):
+            try:
+                from generator import images as _gen_images
+                kit_id = anuncio["kit_id"]
+                kit = database.buscar_kit(kit_id)
+                if kit:
+                    apostila_ids = kit.get("apostila_ids_list", [])
+                    apostilas = [database.buscar_apostila_por_id(aid) for aid in apostila_ids]
+                    apostilas = [a for a in apostilas if a]
+                    variacao = ((anuncio.get("variacao", 1) - 1) % 3) + 1
+                    kit_nome = kit.get("nome", anuncio.get("kit_nome", "Kit"))
+                    print(f"[ML] gerando imagem kit on-demand: kit_id={kit_id} variacao={variacao}")
+                    paths = _gen_images.gerar_capas_kit(kit_id, kit_nome, apostilas, variacao)
+                    if paths:
+                        imagem_path = paths[0]
+                        database.atualizar_anuncio(anuncio_id, imagem_path=imagem_path)
+                        print(f"[ML] imagem kit gerada: {imagem_path}")
+                    else:
+                        print("[ML] gerar_capas_kit retornou lista vazia")
+            except Exception as _e:
+                print(f"[ML] falha ao gerar imagem kit on-demand: {_e}")
 
         picture_ids = _upload_pictures(token, imagem_path)
         if not picture_ids:
