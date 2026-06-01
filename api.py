@@ -982,6 +982,22 @@ async def fix_precos_kits(_auth=Depends(_require_auth)):
     return {"corrigidos": len(alteracoes), "detalhes": alteracoes}
 
 
+@app.post("/api/admin/gerar-caca-palavras")
+async def admin_gerar_caca_palavras(_auth=Depends(_require_auth)):
+    """Cria caça-palavras para todos os temas ainda não existentes."""
+    import scheduler as sched
+    await asyncio.to_thread(sched.gerar_caca_palavras_automaticos)
+    return {"ok": True}
+
+
+@app.post("/api/admin/gerar-kits-caca-palavras")
+async def admin_gerar_kits_caca_palavras(_auth=Depends(_require_auth)):
+    """Cria kits combinando temas de caça-palavras."""
+    import scheduler as sched
+    await asyncio.to_thread(sched.gerar_kits_caca_palavras_automaticos)
+    return {"ok": True}
+
+
 @app.post("/api/admin/ml/fix-caracteristicas")
 async def fix_caracteristicas_ml(_auth=Depends(_require_auth), limite: int = 80, offset: int = 0):
     """Atualiza FORMAT, VERSION e WITH_UNLIMITED_LICENSE em todos os anúncios publicados no ML."""

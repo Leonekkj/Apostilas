@@ -685,6 +685,38 @@ def listar_apostilas_por_topico_e_num_ex() -> dict:
         return result
 
 
+def listar_temas_caca_palavras_existentes() -> set:
+    """Retorna conjunto de temas de caça-palavras já criados."""
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        cur.execute(
+            "SELECT DISTINCT p.tema FROM produtos p "
+            "JOIN topicos t ON p.topico_id = t.id "
+            "WHERE t.slug = 'caca-palavras' AND p.tema IS NOT NULL"
+        )
+        rows = cur.fetchall()
+        return {(r["tema"] if isinstance(r, dict) else r[0]) for r in rows}
+
+
+def listar_apostilas_caca_palavras_por_dificuldade() -> dict:
+    """Retorna {dificuldade: {tema: apostila_id}} para kits de caça-palavras."""
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        cur.execute("""
+            SELECT p.dificuldade, p.tema, MAX(ap.id) AS apostila_id
+            FROM apostilas ap
+            JOIN produtos p ON ap.produto_id = p.id
+            JOIN topicos t  ON p.topico_id   = t.id
+            WHERE t.slug = 'caca-palavras' AND p.tema IS NOT NULL AND p.dificuldade IS NOT NULL
+            GROUP BY p.dificuldade, p.tema
+        """)
+        result: dict = {}
+        for row in cur.fetchall():
+            d = _row_to_dict(row, cur) if USE_POSTGRES else dict(row)
+            result.setdefault(d["dificuldade"], {})[d["tema"]] = d["apostila_id"]
+        return result
+
+
 def kit_existe(apostila_ids: list) -> bool:
     """Retorna True se já existe kit com exatamente esse conjunto de apostila_ids."""
     target = sorted(int(x) for x in apostila_ids)

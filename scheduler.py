@@ -27,6 +27,11 @@ _FATIAS = [30, 60, 90, 120, 150, 200]
 # Preços físicos retail — idênticos aos da api.py para consistência
 _PRECOS_PRODUTO = {30: 69.90, 60: 79.90, 90: 89.90, 120: 99.90, 150: 109.90, 200: 119.90}
 
+_TEMAS_CP = ["geral", "futebol", "culinaria", "animais", "brasil", "musica", "natureza"]
+_CP_VOLUMES = [("facil", 60), ("medio", 60), ("dificil", 60), ("gigante", 300)]
+_PRECOS_CP  = {"facil": 14.90, "medio": 17.90, "dificil": 19.90, "gigante": 34.90}
+_NIVEL_LABEL_CP = {"facil": "Fácil", "medio": "Médio", "dificil": "Difícil", "gigante": "Gigante"}
+
 
 def _preco_apostila(apostila_id: int, num_exercicios: int) -> float:
     """Retorna o preço real do anúncio físico existente, ou fallback da tabela."""
@@ -193,6 +198,122 @@ def gerar_kits_automaticos():
     logger.info("Kits automáticos concluído: %d criados, %d pulados", kits_criados, kits_pulados)
 
 
+def gerar_caca_palavras_automaticos():
+    """Cria caça-palavras para todos os temas ainda não existentes (idempotente)."""
+    from generator import images as gen_images
+
+    topico = database.buscar_topico("caca-palavras")
+    if not topico:
+        logger.error("Tópico caca-palavras não encontrado no banco.")
+        return
+
+    topico_id  = topico["id"]
+    topico_cp  = {"id": topico_id, "nome": "Caça-Palavras", "slug": "caca-palavras"}
+    ja_existem = database.listar_temas_caca_palavras_existentes()
+    criados    = 0
+
+    for tema in _TEMAS_CP:
+        if tema in ja_existem:
+            continue
+
+        logger.info("Criando caça-palavras tema=%s", tema)
+        try:
+            for dificuldade, num_puzzles in _CP_VOLUMES:
+                nivel_l   = _NIVEL_LABEL_CP[dificuldade]
+                nome_vol  = f"Caça-Palavras {tema.title()} — {nivel_l}"
+                preco     = _PRECOS_CP[dificuldade]
+
+                # Título e descrição reutilizando as funções da API
+                from api import _titulo_caca_palavras, _descricao_caca_palavras
+                titulo_ml = _titulo_caca_palavras(nome_vol, tema, dificuldade, num_puzzles)
+                descricao = _descricao_caca_palavras(tema, dificuldade, num_puzzles)
+
+                produto_id  = database.criar_produto_caca_palavras(nome_vol, topico_id, tema, dificuldade)
+                apostila_id = database.salvar_apostila(topico_id, num_puzzles, "{}", produto_id)
+                anuncio_id  = database.criar_anuncio(apostila_id, "digital", 1, titulo_ml, preco, 1, "", None, descricao)
+
+                try:
+                    paths = gen_images.gerar_capas(apostila_id, topico_cp, num_puzzles)
+                    if paths:
+                        database.atualizar_anuncio(anuncio_id, imagem_path=paths[0])
+                except Exception as _img_e:
+                    logger.warning("Imagem caca-palavras %s/%s falhou: %s", tema, dificuldade, _img_e)
+
+                gc.collect()
+
+            criados += 1
+            logger.info("Caça-palavras criado: tema=%s", tema)
+        except Exception as e:
+            logger.error("Erro ao criar caça-palavras tema=%s: %s", tema, e)
+
+    logger.info("Caça-palavras automáticos: %d novos temas criados", criados)
+
+
+def gerar_kits_caca_palavras_automaticos():
+    """Cria kits combinando 2-3 temas diferentes de caça-palavras na mesma dificuldade (idempotente)."""
+    from generator import content as gen_content
+    from generator import images as gen_images
+
+    mapa = database.listar_apostilas_caca_palavras_por_dificuldade()
+    if not mapa:
+        logger.info("Kits caça-palavras: nenhuma apostila disponível.")
+        return
+
+    kits_criados = 0
+    kits_pulados = 0
+    MAX_KITS = 10  # limite por execução para controlar memória
+
+    for dificuldade, temas_map in mapa.items():
+        temas = list(temas_map.keys())
+        if len(temas) < 2:
+            continue
+
+        for r in [2, 3]:
+            if len(temas) < r:
+                continue
+            for combo in itertools.combinations(temas, r):
+                if kits_criados >= MAX_KITS:
+                    logger.info("Kits CP: limite %d atingido.", MAX_KITS)
+                    break
+
+                apostila_ids = [temas_map[t] for t in combo]
+                if database.kit_existe(apostila_ids):
+                    kits_pulados += 1
+                    continue
+
+                try:
+                    apostilas_objs = [database.buscar_apostila_por_id(aid) for aid in apostila_ids]
+                    nivel_l = _NIVEL_LABEL_CP.get(dificuldade, dificuldade.title())
+                    temas_nomes = " + ".join(t.title() for t in combo)
+                    nome = f"Kit Caça-Palavras {temas_nomes} {nivel_l}"[:50]
+
+                    kit_id = database.criar_kit(nome, apostila_ids)
+
+                    preco_unit = _PRECOS_CP.get(dificuldade, 17.90)
+                    preco_kit  = round(preco_unit * r * 0.85, 2)
+                    total_ex   = sum(a.get("num_exercicios", 60) for a in apostilas_objs)
+
+                    titulos  = gen_content.gerar_titulos_kit_ml(nome, apostilas_objs, total_ex)
+                    descricao = gen_content.gerar_descricao_kit_ml(nome, apostilas_objs, total_ex)
+                    all_imgs  = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs)
+
+                    for i, title in enumerate(titulos, start=1):
+                        variacao_img = ((i - 1) % 3) + 1
+                        img_path = next((p for p in all_imgs if f"_v{variacao_img}.png" in p), all_imgs[0] if all_imgs else None)
+                        anuncio_id = database.criar_anuncio(None, "fisico", i, title["titulo"], preco_kit, i, title.get("angulo", ""), kit_id, descricao)
+                        if img_path:
+                            database.atualizar_anuncio(anuncio_id, imagem_path=img_path)
+
+                    kits_criados += 1
+                    logger.info("Kit CP criado: %s (R$%.2f)", nome, preco_kit)
+                except Exception as e:
+                    logger.error("Erro kit CP %s/%s: %s", combo, dificuldade, e)
+                finally:
+                    gc.collect()
+
+    logger.info("Kits caça-palavras: %d criados, %d pulados", kits_criados, kits_pulados)
+
+
 def main():
     global DRY_RUN
 
@@ -219,6 +340,10 @@ def main():
     scheduler.add_job(sincronizar_e_gerar_pdfs, "interval", hours=1)
     # Gera kits automáticos diariamente às 6h
     scheduler.add_job(gerar_kits_automaticos, "cron", hour=6, minute=0)
+    # Cria caça-palavras novos temas às 7h
+    scheduler.add_job(gerar_caca_palavras_automaticos, "cron", hour=7, minute=0)
+    # Kits de caça-palavras às 7h30
+    scheduler.add_job(gerar_kits_caca_palavras_automaticos, "cron", hour=7, minute=30)
 
     logger.info("Scheduler iniciado. Publicações às 9h, 13h e 17h (horário de Brasília)")
     scheduler.start()
