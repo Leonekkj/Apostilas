@@ -336,6 +336,11 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
             {"id": "DEVELOPER",                "value_name": "CogniVita"},
             {"id": "EDUCATIONAL_SOFTWARE_NAME","value_name": titulo},
             {"id": "MODEL",                    "value_name": "Apostila Física Impressa"},
+            # Qualidade do anúncio — características adicionais
+            {"id": "FORMAT",                   "value_id": "2431740" if not is_digital else "2132699",
+                                               "value_name": "Físico" if not is_digital else "Digital"},
+            {"id": "VERSION",                  "value_name": "1ª Edição"},
+            {"id": "WITH_UNLIMITED_LICENSE",   "value_id": "242084", "value_name": "Não"},
         ],
     }
 
