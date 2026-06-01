@@ -25,7 +25,7 @@ from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -1121,11 +1121,11 @@ async def admin_gerar_caca_palavras(_auth=Depends(_require_auth)):
 
 
 @app.post("/api/admin/gerar-kits-caca-palavras")
-async def admin_gerar_kits_caca_palavras(_auth=Depends(_require_auth)):
-    """Cria kits combinando temas de caça-palavras."""
+async def admin_gerar_kits_caca_palavras(background_tasks: BackgroundTasks, _auth=Depends(_require_auth)):
+    """Cria kits combinando temas de caça-palavras (roda em background — retorna imediatamente)."""
     import scheduler as sched
-    await asyncio.to_thread(sched.gerar_kits_caca_palavras_automaticos)
-    return {"ok": True}
+    background_tasks.add_task(asyncio.to_thread, sched.gerar_kits_caca_palavras_automaticos)
+    return {"ok": True, "msg": "Criação de kits CP iniciada em background"}
 
 
 @app.get("/api/admin/debug-cp-mapa")

@@ -289,7 +289,7 @@ def gerar_kits_caca_palavras_automaticos():
 
     kits_criados = 0
     kits_pulados = 0
-    MAX_KITS = 10  # limite por execução para controlar memória
+    MAX_KITS = 30  # limite por execução para controlar memória
 
     for dificuldade, temas_map in mapa.items():
         temas = list(temas_map.keys())
