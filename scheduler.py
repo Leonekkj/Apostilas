@@ -41,6 +41,30 @@ def _preco_apostila(apostila_id: int, num_exercicios: int) -> float:
     return _PRECOS_PRODUTO.get(num_exercicios, 79.90)
 
 
+def _publicar_anuncios_kit(anuncio_ids: list, kit_nome: str = ""):
+    """Publica uma lista de anúncios no ML com 0.3s de pausa entre cada um.
+    Pula anúncios com erro de validação anterior ou já publicados."""
+    publicados = 0
+    for aid in anuncio_ids:
+        try:
+            anuncio = database.buscar_anuncio_por_id(aid)
+            if not anuncio:
+                continue
+            if anuncio.get("ml_id"):
+                continue  # já publicado
+            if anuncio.get("erro_msg") and "validation_error" in str(anuncio.get("erro_msg", "")):
+                logger.warning("Pulando anúncio %d (validation_error anterior): %s", aid, anuncio.get("erro_msg", "")[:80])
+                continue
+            ml_id = ml_client.publicar_anuncio(aid)
+            logger.info("Publicado anúncio %d → %s (%s)", aid, ml_id, kit_nome)
+            publicados += 1
+            time.sleep(0.3)
+        except Exception as e:
+            logger.error("Erro ao publicar anúncio %d (%s): %s", aid, kit_nome, e)
+            time.sleep(0.3)
+    return publicados
+
+
 def publicar_batch():
     """Publica até DAILY_LIMIT anúncios rascunho."""
     rascunhos = database.buscar_anuncios_rascunho(limite=DAILY_LIMIT)
@@ -173,6 +197,7 @@ def gerar_kits_automaticos():
                     # Gera v1/v2/v3 uma única vez por kit — reutiliza para os 6 anúncios
                     all_image_paths = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs)
 
+                    novos_anuncio_ids = []
                     for i, title in enumerate(titulos, start=1):
                         variacao_img = ((i - 1) % 3) + 1
                         image_path = next(
@@ -185,9 +210,11 @@ def gerar_kits_automaticos():
                         )
                         if image_path:
                             database.atualizar_anuncio(anuncio_id, imagem_path=image_path)
+                        novos_anuncio_ids.append(anuncio_id)
 
+                    pub = _publicar_anuncios_kit(novos_anuncio_ids, nome)
                     kits_criados += 1
-                    logger.info("Kit criado: %s (%d ex, %d apostilas, R$%.2f)", nome, num_ex, r, preco_kit)
+                    logger.info("Kit criado e publicado: %s (%d ex, %d apostilas, R$%.2f, %d anúncios publicados)", nome, num_ex, r, preco_kit, pub)
 
                 except Exception as e:
                     logger.error("Erro ao criar kit automático (%s, %d ex): %s", combo_topicos, num_ex, e)
@@ -239,6 +266,7 @@ def gerar_caca_palavras_automaticos():
                 except Exception as _img_e:
                     logger.warning("Imagem caca-palavras %s/%s falhou: %s", tema, dificuldade, _img_e)
 
+                _publicar_anuncios_kit([anuncio_id], f"CP {tema}/{dificuldade}")
                 gc.collect()
 
             criados += 1
@@ -297,15 +325,18 @@ def gerar_kits_caca_palavras_automaticos():
                     descricao = gen_content.gerar_descricao_kit_ml(nome, apostilas_objs, total_ex)
                     all_imgs  = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs)
 
+                    novos_anuncio_ids = []
                     for i, title in enumerate(titulos, start=1):
                         variacao_img = ((i - 1) % 3) + 1
                         img_path = next((p for p in all_imgs if f"_v{variacao_img}.png" in p), all_imgs[0] if all_imgs else None)
                         anuncio_id = database.criar_anuncio(None, "fisico", i, title["titulo"], preco_kit, i, title.get("angulo", ""), kit_id, descricao)
                         if img_path:
                             database.atualizar_anuncio(anuncio_id, imagem_path=img_path)
+                        novos_anuncio_ids.append(anuncio_id)
 
+                    pub = _publicar_anuncios_kit(novos_anuncio_ids, nome)
                     kits_criados += 1
-                    logger.info("Kit CP criado: %s (R$%.2f)", nome, preco_kit)
+                    logger.info("Kit CP criado e publicado: %s (R$%.2f, %d anúncios)", nome, preco_kit, pub)
                 except Exception as e:
                     logger.error("Erro kit CP %s/%s: %s", combo, dificuldade, e)
                 finally:

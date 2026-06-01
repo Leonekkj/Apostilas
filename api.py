@@ -339,6 +339,33 @@ async def stats(_auth=Depends(_require_auth)):
 
 
 # ---------------------------------------------------------------------------
+# Helpers internos
+# ---------------------------------------------------------------------------
+
+async def _publicar_anuncios(anuncio_ids: list) -> dict:
+    """Publica uma lista de anúncios no ML com 0.3s de pausa entre cada um.
+    Retorna {'publicados': [...ml_id], 'erros': [{anuncio_id, erro}]}."""
+    publicados = []
+    erros = []
+    for aid in anuncio_ids:
+        try:
+            anuncio = await asyncio.to_thread(database.buscar_anuncio_por_id, aid)
+            if not anuncio:
+                continue
+            if anuncio.get("ml_id"):
+                continue
+            if anuncio.get("erro_msg") and "validation_error" in str(anuncio.get("erro_msg", "")):
+                erros.append({"anuncio_id": aid, "erro": anuncio["erro_msg"]})
+                continue
+            ml_id = await asyncio.to_thread(ml_client.publicar_anuncio, aid)
+            publicados.append({"anuncio_id": aid, "ml_id": ml_id})
+        except Exception as e:
+            erros.append({"anuncio_id": aid, "erro": str(e)})
+        await asyncio.sleep(0.3)
+    return {"publicados": publicados, "erros": erros}
+
+
+# ---------------------------------------------------------------------------
 # Produtos (apostilas)
 # ---------------------------------------------------------------------------
 
@@ -437,7 +464,22 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
                 "anuncio_digital_id": anuncio_digital_id, "imagem_path": image_path,
             })
 
-        return {"produto_id": produto_id, "nome": body.nome, "serie": body.serie, "apostilas": apostilas_result}
+        # Publica todos os anúncios imediatamente após criação
+        pub_result = await _publicar_anuncios(created_anuncio_ids)
+        # Preenche ml_id nos apostilas_result para o response
+        ml_id_map = {p["anuncio_id"]: p["ml_id"] for p in pub_result["publicados"]}
+        for ap in apostilas_result:
+            ap["ml_id"] = ml_id_map.get(ap["anuncio_id"])
+            ap["ml_id_digital"] = ml_id_map.get(ap["anuncio_digital_id"])
+
+        return {
+            "produto_id": produto_id,
+            "nome": body.nome,
+            "serie": body.serie,
+            "apostilas": apostilas_result,
+            "publicados": len(pub_result["publicados"]),
+            "erros_publicacao": pub_result["erros"],
+        }
 
     except Exception as exc:
         for fpath in generated_files:
@@ -470,6 +512,7 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
         raise HTTPException(status_code=400, detail="Use o tópico de slug 'caca-palavras'")
 
     volumes = []
+    pub_result: dict = {"publicados": [], "erros": []}
     try:
         from generator import images as gen_images
         topico_cp = {"id": body.topico_id, "nome": "Caça-Palavras", "slug": "caca-palavras"}
@@ -511,6 +554,7 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
         ])
 
         # Fase 3: salva imagens e monta resposta
+        anuncio_ids_cp = []
         for (dificuldade, num_puzzles, nome_vol, preco, produto_id, apostila_id, anuncio_id), imagem_path in zip(registros, imagens):
             if imagem_path:
                 await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, imagem_path=imagem_path)
@@ -522,12 +566,25 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
                 "preco":       preco,
                 "nome":        nome_vol,
             })
+            anuncio_ids_cp.append(anuncio_id)
+
+        # Fase 4: publica todos os anúncios imediatamente
+        pub_result = await _publicar_anuncios(anuncio_ids_cp)
+        ml_id_map = {p["anuncio_id"]: p["ml_id"] for p in pub_result["publicados"]}
+        for v in volumes:
+            v["ml_id"] = ml_id_map.get(v["anuncio_id"])
+
     except Exception as exc:
         tb = traceback.format_exc()
         print(f"[ERRO caca-palavras] {exc}\n{tb}")
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
 
-    return {"tema": body.tema, "volumes": volumes}
+    return {
+        "tema": body.tema,
+        "volumes": volumes,
+        "publicados": len(pub_result["publicados"]),
+        "erros_publicacao": pub_result["erros"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -620,7 +677,29 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
                 "preco": preco_kit,
             })
 
-        return {"kit_id": kit_id, "nome": nome, "anuncios": anuncios_result}
+        # Publica todos os anúncios do kit imediatamente
+        publicados = []
+        erros_pub = []
+        for item in anuncios_result:
+            aid = item["anuncio_id"]
+            try:
+                ml_id = await asyncio.to_thread(ml_client.publicar_anuncio, aid)
+                item["ml_id"] = ml_id
+                item["status"] = "publicado"
+                publicados.append(aid)
+            except Exception as pub_e:
+                item["status"] = "erro"
+                item["erro_pub"] = str(pub_e)
+                erros_pub.append({"anuncio_id": aid, "erro": str(pub_e)})
+            await asyncio.sleep(0.3)
+
+        return {
+            "kit_id": kit_id,
+            "nome": nome,
+            "anuncios": anuncios_result,
+            "publicados": len(publicados),
+            "erros_publicacao": erros_pub,
+        }
 
     except HTTPException:
         raise
