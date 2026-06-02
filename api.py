@@ -1354,7 +1354,7 @@ async def shopee_callback(code: str, shop_id: int):
 
 
 @app.get("/api/admin/ml-diagnostico")
-async def ml_diagnostico(_=Depends(require_admin)):
+async def ml_diagnostico(_=Depends(_require_auth)):
     """Busca anúncios inativos/pausados no ML e agrupa por motivo."""
     from ml import auth as ml_auth
     import requests as _req
@@ -1435,7 +1435,7 @@ async def ml_diagnostico(_=Depends(require_admin)):
 
 
 @app.post("/api/admin/publicar-shopee")
-async def publicar_shopee_teste(_=Depends(require_admin)):
+async def publicar_shopee_teste(_=Depends(_require_auth)):
     """Publica 1 anúncio de cada tipo (importado/fisico/digital/kit) que está ativo no ML mas não na Shopee."""
     tokens = await asyncio.to_thread(database.buscar_shopee_tokens)
     if not tokens or not tokens.get("access_token"):
