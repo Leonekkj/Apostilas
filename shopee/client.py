@@ -41,6 +41,16 @@ def _api(path: str, payload: dict, access_token: str, shop_id: int) -> dict:
 
 def _upload_imagem(imagem_path: str, access_token: str, shop_id: int) -> Optional[str]:
     """Faz upload de imagem e retorna image_id da Shopee."""
+    import storage as _storage
+    tmp_path = None
+    if _storage.is_url(imagem_path):
+        try:
+            imagem_path = _storage.download_to_temp(imagem_path)
+            tmp_path = imagem_path
+        except Exception as e:
+            print(f"[Shopee] falha ao baixar imagem R2: {e}")
+            return None
+
     if not imagem_path or not Path(imagem_path).exists():
         return None
 

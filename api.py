@@ -428,6 +428,9 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
         tabela = body.precos or _PRECOS_PRODUTO
         for (posicao, num_ex, apostila_id), (titulo, descricao, descricao_digital, image_paths) in zip(apostilas_db, resultados):
             image_path = image_paths[0] if image_paths else None
+            if image_path:
+                import storage as _storage
+                image_path = await asyncio.to_thread(_storage.upload, image_path)
             preco_fisico = float(tabela.get(str(num_ex), tabela.get(num_ex, _PRECOS_PRODUTO.get(num_ex, 29.90))))
 
             # Anúncio físico
@@ -554,9 +557,11 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
         ])
 
         # Fase 3: salva imagens e monta resposta
+        import storage as _storage
         anuncio_ids_cp = []
         for (dificuldade, num_puzzles, nome_vol, preco, produto_id, apostila_id, anuncio_id), imagem_path in zip(registros, imagens):
             if imagem_path:
+                imagem_path = await asyncio.to_thread(_storage.upload, imagem_path)
                 await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, imagem_path=imagem_path)
             volumes.append({
                 "dificuldade": dificuldade,
@@ -660,6 +665,9 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
             )
             generated_files.extend(image_paths)
             image_path = image_paths[0] if image_paths else None
+            if image_path:
+                import storage as _storage
+                image_path = await asyncio.to_thread(_storage.upload, image_path)
 
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,

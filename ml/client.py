@@ -116,7 +116,8 @@ def publicar_anuncio(anuncio_id: int) -> str:
         print(f"[ML] publicar_anuncio #{anuncio_id}: imagem_path={imagem_path!r}")
 
         # Se não tiver imagem ou o arquivo não existir mais no disco (filesystem efêmero), gera on-demand
-        imagem_ausente = not imagem_path or not os.path.exists(imagem_path)
+        import storage as _storage
+        imagem_ausente = not imagem_path or (not _storage.is_url(imagem_path) and not os.path.exists(imagem_path))
         if imagem_ausente and anuncio.get("apostila_id"):
             try:
                 from generator import images as _gen_images
@@ -222,17 +223,30 @@ def publicar_anuncio(anuncio_id: int) -> str:
 
 
 def _upload_single(token: str, imagem_path: str) -> Optional[str]:
-    """Faz upload de uma imagem e retorna o picture_id, ou None se falhar."""
+    """Faz upload de uma imagem e retorna o picture_id, ou None se falhar.
+    Se imagem_path for URL (R2), envia via JSON — ML baixa diretamente do R2 sem usar bandwidth do Render.
+    """
     if not imagem_path:
         print("[ML] _upload_single: imagem_path é None/vazio")
         return None
-    if not os.path.exists(imagem_path):
-        print(f"[ML] _upload_single: arquivo não existe → {imagem_path}")
-        return None
-    size = os.path.getsize(imagem_path)
-    print(f"[ML] _upload_single: enviando {imagem_path} ({size} bytes)")
-    with open(imagem_path, "rb") as f:
-        response = requests.post(ML_PICTURES_ENDPOINT, files={"file": f}, params={"access_token": token})
+
+    import storage as _storage
+    if _storage.is_url(imagem_path):
+        print(f"[ML] _upload_single: enviando via URL R2 → {imagem_path}")
+        response = requests.post(
+            ML_PICTURES_ENDPOINT,
+            json={"source": imagem_path},
+            params={"access_token": token},
+        )
+    else:
+        if not os.path.exists(imagem_path):
+            print(f"[ML] _upload_single: arquivo não existe → {imagem_path}")
+            return None
+        size = os.path.getsize(imagem_path)
+        print(f"[ML] _upload_single: enviando arquivo {imagem_path} ({size} bytes)")
+        with open(imagem_path, "rb") as f:
+            response = requests.post(ML_PICTURES_ENDPOINT, files={"file": f}, params={"access_token": token})
+
     if response.status_code not in (200, 201):
         print(f"[ML] _upload_single: falhou {response.status_code} → {response.text[:300]}")
         return None
@@ -260,25 +274,27 @@ def _upload_pictures(token: str, imagem_path: str) -> list[str]:
         return ids
 
     # Fallback: capa gerada pelo Pillow + 2 variações adjacentes
-    if not imagem_path or not os.path.exists(imagem_path):
+    import storage as _storage
+    is_url = _storage.is_url(imagem_path)
+    if not imagem_path or (not is_url and not os.path.exists(imagem_path)):
         return ids
 
     main_id = _upload_single(token, imagem_path)
     if main_id:
         ids.append(main_id)
 
-    match = re.search(r'_v(\d+)\.png$', imagem_path)
-    if match:
-        v = int(match.group(1))
-        base = imagem_path[:match.start()]
-        # Só variações Leonardo (v1-v3); v4-v6 são Pillow puro e não devem ir ao ML
-        others = [x for x in [1, 2, 3] if x != v]
-        for next_v in others[:2]:
-            next_path = f"{base}_v{next_v}.png"
-            if os.path.exists(next_path):
-                pid = _upload_single(token, next_path)
-                if pid:
-                    ids.append(pid)
+    if not is_url:
+        match = re.search(r'_v(\d+)\.png$', imagem_path)
+        if match:
+            v = int(match.group(1))
+            base = imagem_path[:match.start()]
+            others = [x for x in [1, 2, 3] if x != v]
+            for next_v in others[:2]:
+                next_path = f"{base}_v{next_v}.png"
+                if os.path.exists(next_path):
+                    pid = _upload_single(token, next_path)
+                    if pid:
+                        ids.append(pid)
 
     return ids
 
