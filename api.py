@@ -1404,8 +1404,11 @@ async def ml_diagnostico(_=Depends(_require_auth)):
             await asyncio.sleep(0.2)
         return detalhes
 
+    # Debug: confirma user_id e testa API
+    debug_info = {"user_id": user_id}
+
     resultado = {}
-    for status in ["paused", "under_review", "inactive"]:
+    for status in ["active", "paused", "under_review", "inactive", "closed"]:
         ids = await _buscar_ids(status)
         if not ids:
             continue
@@ -1431,7 +1434,7 @@ async def ml_diagnostico(_=Depends(_require_auth)):
             },
         }
 
-    return resultado
+    return {"debug": debug_info, "resultado": resultado}
 
 
 @app.post("/api/admin/publicar-shopee")
