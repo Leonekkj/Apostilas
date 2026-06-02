@@ -1437,6 +1437,228 @@ async def ml_diagnostico(_=Depends(_require_auth)):
     return {"debug": debug_info, "resultado": resultado}
 
 
+@app.get("/api/admin/ml-problemas")
+async def ml_problemas(_=Depends(_require_auth)):
+    """Busca todos os anúncios do banco com ml_id e verifica status/sub_status direto na ML API."""
+    from ml import auth as ml_auth
+    import requests as _req
+    from database import _get_conn, _cursor, _rows_to_dicts
+
+    token = await asyncio.to_thread(ml_auth.get_valid_token)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def _buscar_ml_ids():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute("SELECT id, ml_id, titulo FROM anuncios WHERE ml_id IS NOT NULL AND ml_id != '' AND status != 'deletado'")
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    anuncios = await asyncio.to_thread(_buscar_ml_ids)
+    ml_ids = [a["ml_id"] for a in anuncios]
+    id_map = {a["ml_id"]: a for a in anuncios}
+
+    problemas = []
+    ok = 0
+
+    for i in range(0, len(ml_ids), 20):
+        chunk = ml_ids[i:i + 20]
+        resp = await asyncio.to_thread(
+            lambda c=chunk: _req.get(
+                "https://api.mercadolibre.com/items",
+                params={"ids": ",".join(c), "attributes": "id,status,sub_status,title,warnings"},
+                headers=headers, timeout=15,
+            )
+        )
+        for entry in resp.json():
+            if not isinstance(entry, dict) or entry.get("code") != 200:
+                continue
+            item = entry["body"]
+            ml_status = item.get("status", "")
+            sub_status = item.get("sub_status") or []
+            warnings = [w.get("code") or str(w) for w in (item.get("warnings") or [])]
+
+            if ml_status == "active" and not sub_status and not warnings:
+                ok += 1
+                continue
+
+            problemas.append({
+                "ml_id": item.get("id"),
+                "titulo": (item.get("title") or "")[:60],
+                "status": ml_status,
+                "sub_status": sub_status,
+                "warnings": warnings,
+                "anuncio_id": id_map.get(item.get("id"), {}).get("id"),
+            })
+        await asyncio.sleep(0.3)
+
+    por_motivo: dict = {}
+    for p in problemas:
+        chave = str(p["sub_status"] or p["warnings"] or p["status"])
+        por_motivo.setdefault(chave, []).append(p)
+
+    return {
+        "total_verificados": len(ml_ids),
+        "ok": ok,
+        "com_problema": len(problemas),
+        "por_motivo": {
+            k: {"quantidade": len(v), "exemplos": v[:2]}
+            for k, v in sorted(por_motivo.items(), key=lambda x: -len(x[1]))
+        },
+    }
+
+
+async def _fix_titulos_bg():
+    from ml import auth as ml_auth
+    import requests as _req
+    from database import _get_conn, _cursor, PH, _rows_to_dicts
+
+    token = ml_auth.get_valid_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def _buscar_duplicados():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            # Busca títulos com mais de 1 anúncio ativo com ml_id
+            cur.execute(f"""
+                SELECT a.id, a.ml_id, a.titulo, a.variacao, a.kit_id, a.apostila_id,
+                       ap.num_exercicios, kt.nome AS kit_nome
+                FROM anuncios a
+                LEFT JOIN apostilas ap ON a.apostila_id = ap.id
+                LEFT JOIN kits kt ON a.kit_id = kt.id
+                WHERE a.ml_id IS NOT NULL AND a.ml_id != ''
+                  AND a.status != 'deletado'
+                  AND a.titulo IN (
+                      SELECT titulo FROM anuncios
+                      WHERE ml_id IS NOT NULL AND ml_id != '' AND status != 'deletado'
+                      GROUP BY titulo HAVING COUNT(*) > 1
+                  )
+                ORDER BY a.titulo, a.id
+            """)
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    duplicados = _buscar_duplicados()
+
+    # Agrupa por título
+    por_titulo: dict = {}
+    for an in duplicados:
+        por_titulo.setdefault(an["titulo"], []).append(an)
+
+    corrigidos = []
+    erros = []
+
+    for titulo_orig, grupo in por_titulo.items():
+        for idx, an in enumerate(grupo, start=1):
+            # Gera título único: adiciona Vol. N ou total de exercícios
+            num_ex = an.get("num_exercicios") or 0
+            variacao = an.get("variacao") or idx
+
+            base = titulo_orig
+            # Remove sufixos antigos de vol. se existir
+            for suf in [" Vol. 1", " Vol. 2", " Vol. 3", " - Vol. 1", " - Vol. 2", " - Vol. 3"]:
+                base = base.replace(suf, "")
+            base = base.strip()
+
+            sufixo = f" Vol. {variacao}"
+            max_base = 60 - len(sufixo)
+            if len(base) > max_base:
+                base = base[:max_base].rsplit(" ", 1)[0]
+            novo_titulo = (base + sufixo)[:60]
+
+            if novo_titulo == titulo_orig:
+                continue
+
+            # Atualiza no banco
+            with _get_conn() as conn:
+                cur = _cursor(conn)
+                cur.execute(f"UPDATE anuncios SET titulo = {PH} WHERE id = {PH}", [novo_titulo, an["id"]])
+                conn.commit()
+
+            # Atualiza no ML
+            r = _req.put(
+                f"https://api.mercadolibre.com/items/{an['ml_id']}",
+                json={"title": novo_titulo},
+                headers=headers,
+                timeout=15,
+            )
+            if r.status_code in (200, 201):
+                corrigidos.append({"anuncio_id": an["id"], "ml_id": an["ml_id"], "novo_titulo": novo_titulo})
+            else:
+                erros.append({"anuncio_id": an["id"], "ml_id": an["ml_id"], "erro": r.text[:200]})
+            import time; time.sleep(0.4)
+
+    print(f"[fix-titulos] corrigidos={len(corrigidos)} erros={len(erros)}")
+
+
+async def _fix_categoria_bg():
+    from ml import auth as ml_auth
+    import requests as _req
+    from database import _get_conn, _cursor, PH, _rows_to_dicts
+
+    token = ml_auth.get_valid_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def _buscar_com_ml_id():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute("SELECT id, ml_id, tipo FROM anuncios WHERE ml_id IS NOT NULL AND ml_id != '' AND status != 'deletado'")
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    anuncios = _buscar_com_ml_id()
+    ml_ids = [a["ml_id"] for a in anuncios]
+    id_map = {a["ml_id"]: a for a in anuncios}
+
+    fechados = []
+    for i in range(0, len(ml_ids), 20):
+        chunk = ml_ids[i:i + 20]
+        r = _req.get(
+            "https://api.mercadolibre.com/items",
+            params={"ids": ",".join(chunk), "attributes": "id,status,sub_status"},
+            headers=headers, timeout=15,
+        )
+        for entry in r.json():
+            if isinstance(entry, dict) and entry.get("code") == 200:
+                item = entry["body"]
+                if item.get("status") == "closed":
+                    ml_id = item["id"]
+                    an = id_map.get(ml_id, {})
+                    if an:
+                        fechados.append(an)
+        import time; time.sleep(0.3)
+
+    print(f"[fix-categoria] encontrados {len(fechados)} fechados para re-publicar")
+
+    # Limpa ml_id e re-publica
+    republicados = []
+    erros = []
+    for an in fechados:
+        try:
+            with _get_conn() as conn:
+                cur = _cursor(conn)
+                cur.execute(f"UPDATE anuncios SET ml_id = NULL, status = 'rascunho', erro_msg = NULL WHERE id = {PH}", [an["id"]])
+                conn.commit()
+            novo_ml_id = ml_client.publicar_anuncio(an["id"])
+            republicados.append({"anuncio_id": an["id"], "novo_ml_id": novo_ml_id})
+        except Exception as e:
+            erros.append({"anuncio_id": an["id"], "erro": str(e)})
+        import time; time.sleep(0.5)
+
+    print(f"[fix-categoria] republicados={len(republicados)} erros={len(erros)}")
+
+
+@app.post("/api/admin/fix-titulos-duplicados")
+async def fix_titulos_duplicados(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """Torna únicos os títulos duplicados nos anúncios ativos no ML (adiciona Vol. N)."""
+    background_tasks.add_task(_fix_titulos_bg)
+    return {"ok": True, "msg": "Correção de títulos duplicados iniciada em background"}
+
+
+@app.post("/api/admin/fix-categoria-incorreta")
+async def fix_categoria_incorreta(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """Detecta itens fechados por categoria incorreta no ML e os re-publica."""
+    background_tasks.add_task(_fix_categoria_bg)
+    return {"ok": True, "msg": "Fix de categoria iniciado em background"}
+
+
 @app.post("/api/admin/publicar-shopee")
 async def publicar_shopee_teste(_=Depends(_require_auth)):
     """Publica 1 anúncio de cada tipo (importado/fisico/digital/kit) que está ativo no ML mas não na Shopee."""
