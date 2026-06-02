@@ -1345,6 +1345,127 @@ async def shopee_callback(code: str, shop_id: int):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/api/admin/ml-diagnostico")
+async def ml_diagnostico(_=Depends(require_admin)):
+    """Busca anúncios inativos/pausados no ML e agrupa por motivo."""
+    from ml import auth as ml_auth
+    import requests as _req
+
+    token = await asyncio.to_thread(ml_auth.get_valid_token)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    me_r = await asyncio.to_thread(
+        lambda: _req.get("https://api.mercadolibre.com/users/me", headers=headers, timeout=15)
+    )
+    user_id = me_r.json()["id"]
+
+    async def _buscar_ids(status: str) -> list:
+        ids = []
+        offset = 0
+        while True:
+            resp = await asyncio.to_thread(
+                lambda o=offset: _req.get(
+                    f"https://api.mercadolibre.com/users/{user_id}/items/search",
+                    params={"status": status, "limit": 100, "offset": o},
+                    headers=headers, timeout=15,
+                )
+            )
+            data = resp.json()
+            batch = data.get("results", [])
+            ids.extend(batch)
+            total = data.get("paging", {}).get("total", 0)
+            offset += len(batch)
+            if offset >= total or not batch:
+                break
+        return ids
+
+    async def _batch_detalhes(ids: list) -> list:
+        detalhes = []
+        for i in range(0, min(len(ids), 200), 20):
+            chunk = ids[i:i + 20]
+            resp = await asyncio.to_thread(
+                lambda c=chunk: _req.get(
+                    "https://api.mercadolibre.com/items",
+                    params={"ids": ",".join(c), "attributes": "id,status,sub_status,title,warnings,health"},
+                    headers=headers, timeout=15,
+                )
+            )
+            for entry in resp.json():
+                if isinstance(entry, dict) and entry.get("code") == 200:
+                    detalhes.append(entry["body"])
+            await asyncio.sleep(0.2)
+        return detalhes
+
+    resultado = {}
+    for status in ["paused", "under_review", "inactive"]:
+        ids = await _buscar_ids(status)
+        if not ids:
+            continue
+        detalhes = await _batch_detalhes(ids)
+
+        por_motivo: dict = {}
+        for item in detalhes:
+            sub = tuple(sorted(item.get("sub_status") or []))
+            warnings = [w.get("code", w) for w in (item.get("warnings") or [])]
+            chave = str(sub or warnings or "sem_motivo")
+            por_motivo.setdefault(chave, []).append({
+                "id": item.get("id"),
+                "titulo": (item.get("title") or "")[:60],
+                "health": item.get("health"),
+            })
+
+        resultado[status] = {
+            "total_ids": len(ids),
+            "amostrados": len(detalhes),
+            "por_motivo": {
+                k: {"quantidade": len(v), "exemplos": v[:3]}
+                for k, v in sorted(por_motivo.items(), key=lambda x: -len(x[1]))
+            },
+        }
+
+    return resultado
+
+
+@app.post("/api/admin/publicar-shopee")
+async def publicar_shopee_teste(_=Depends(require_admin)):
+    """Publica 1 anúncio de cada tipo (importado/fisico/digital/kit) que está ativo no ML mas não na Shopee."""
+    tokens = await asyncio.to_thread(database.buscar_shopee_tokens)
+    if not tokens or not tokens.get("access_token"):
+        raise HTTPException(status_code=503, detail="Shopee não conectada — faça OAuth primeiro via /api/shopee/auth")
+
+    from shopee import client as shopee_client
+    from database import _get_conn, _cursor, PH, _rows_to_dicts
+
+    def _buscar_um_por_tipo() -> list[dict]:
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(f"""
+                SELECT * FROM anuncios
+                WHERE id IN (
+                    SELECT MIN(id) FROM anuncios
+                    WHERE ml_id IS NOT NULL AND ml_id != ''
+                    AND (shopee_item_id IS NULL OR shopee_item_id = '')
+                    AND status != 'deletado'
+                    GROUP BY tipo
+                )
+            """)
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    candidatos = await asyncio.to_thread(_buscar_um_por_tipo)
+
+    publicados = []
+    erros = []
+    for an in candidatos:
+        try:
+            item_id = await asyncio.to_thread(shopee_client.publicar_anuncio, an["id"])
+            publicados.append({"anuncio_id": an["id"], "tipo": an["tipo"], "titulo": an.get("titulo"), "shopee_item_id": item_id})
+        except Exception as e:
+            erros.append({"anuncio_id": an["id"], "tipo": an["tipo"], "titulo": an.get("titulo"), "erro": str(e)})
+        await asyncio.sleep(0.5)
+
+    return {"publicados": publicados, "erros": erros, "total_candidatos": len(candidatos)}
+
+
 @app.get("/api/ml/listing-types")
 async def ml_listing_types():
     """Retorna os tipos de anúncio disponíveis para o vendedor na categoria configurada."""
