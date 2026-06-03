@@ -1522,7 +1522,7 @@ async def _fix_caca_palavras_digital_bg():
             cur.execute(f"""
                 SELECT id, ml_id, titulo, tipo
                 FROM anuncios
-                WHERE (titulo LIKE '%aça-palavras%' OR titulo LIKE '%aça palavras%')
+                WHERE (titulo ILIKE '%palavras%' OR titulo ILIKE '%ca_a%')
                   AND ml_id IS NOT NULL AND ml_id != ''
                   AND status != 'deletado'
             """)
