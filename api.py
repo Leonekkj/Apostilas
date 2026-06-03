@@ -1507,6 +1507,76 @@ async def ml_problemas(_=Depends(_require_auth)):
     }
 
 
+async def _fix_caca_palavras_digital_bg():
+    from ml import auth as ml_auth
+    import requests as _req
+    from database import _get_conn, _cursor, PH, _rows_to_dicts
+    import re
+
+    token = ml_auth.get_valid_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def _buscar_cp():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(f"""
+                SELECT id, ml_id, titulo, tipo
+                FROM anuncios
+                WHERE (titulo LIKE '%aça-palavras%' OR titulo LIKE '%aça palavras%')
+                  AND ml_id IS NOT NULL AND ml_id != ''
+                  AND status != 'deletado'
+            """)
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    def _fix_titulo(titulo: str) -> str:
+        remover = ["Impresso", "Impressa", "Impressos", "Físico", "Física",
+                   "Fisico", "Fisica", "Físicos", "Físicas", "Atividade Físico"]
+        t = titulo
+        for palavra in remover:
+            t = re.sub(rf'\b{re.escape(palavra)}\b', '', t, flags=re.IGNORECASE)
+        t = re.sub(r'\s+', ' ', t).strip().strip('-').strip()
+        # Garante PDF no título
+        if "pdf" not in t.lower():
+            sufixo = " PDF"
+            max_base = 60 - len(sufixo)
+            if len(t) > max_base:
+                t = t[:max_base].rsplit(" ", 1)[0]
+            t = (t + sufixo)[:60]
+        return t[:60]
+
+    anuncios = _buscar_cp()
+    corrigidos = []
+    erros = []
+
+    for an in anuncios:
+        novo_titulo = _fix_titulo(an["titulo"])
+        novo_tipo = "digital"
+
+        # Atualiza banco
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(
+                f"UPDATE anuncios SET tipo = {PH}, titulo = {PH} WHERE id = {PH}",
+                [novo_tipo, novo_titulo, an["id"]],
+            )
+            conn.commit()
+
+        # Atualiza ML
+        r = _req.put(
+            f"https://api.mercadolibre.com/items/{an['ml_id']}",
+            json={"title": novo_titulo, "category_id": "MLB1227"},
+            headers=headers,
+            timeout=15,
+        )
+        if r.status_code in (200, 201):
+            corrigidos.append({"anuncio_id": an["id"], "ml_id": an["ml_id"], "novo_titulo": novo_titulo})
+        else:
+            erros.append({"anuncio_id": an["id"], "ml_id": an["ml_id"], "erro": r.text[:200]})
+        import time; time.sleep(0.4)
+
+    print(f"[fix-cp-digital] corrigidos={len(corrigidos)} erros={len(erros)} total={len(anuncios)}")
+
+
 async def _fix_titulos_bg():
     from ml import auth as ml_auth
     import requests as _req
@@ -1643,6 +1713,13 @@ async def _fix_categoria_bg():
         import time; time.sleep(0.5)
 
     print(f"[fix-categoria] republicados={len(republicados)} erros={len(erros)}")
+
+
+@app.post("/api/admin/fix-caca-palavras-digital")
+async def fix_caca_palavras_digital(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """Corrige todos os anúncios de caça-palavras: tipo=digital, remove Físico/Impresso do título, categoria MLB1227."""
+    background_tasks.add_task(_fix_caca_palavras_digital_bg)
+    return {"ok": True, "msg": "Fix caça-palavras digital iniciado em background"}
 
 
 @app.post("/api/admin/fix-titulos-duplicados")
