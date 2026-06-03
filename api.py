@@ -1520,11 +1520,18 @@ async def _fix_caca_palavras_digital_bg():
         with _get_conn() as conn:
             cur = _cursor(conn)
             cur.execute(f"""
-                SELECT id, ml_id, titulo, tipo
-                FROM anuncios
-                WHERE (titulo ILIKE '%palavras%' OR titulo ILIKE '%ca_a%')
-                  AND ml_id IS NOT NULL AND ml_id != ''
-                  AND status != 'deletado'
+                SELECT a.id, a.ml_id, a.titulo, a.tipo
+                FROM anuncios a
+                LEFT JOIN kits k ON a.kit_id = k.id
+                LEFT JOIN apostilas ap ON a.apostila_id = ap.id
+                LEFT JOIN produtos pr ON ap.produto_id = pr.id
+                WHERE a.ml_id IS NOT NULL AND a.ml_id != ''
+                  AND a.status != 'deletado'
+                  AND (
+                    k.nome ILIKE '%palavras%'
+                    OR a.titulo ILIKE '%palavras%'
+                    OR pr.nome ILIKE '%palavras%'
+                  )
             """)
             return _rows_to_dicts(cur.fetchall(), cur)
 
