@@ -1709,6 +1709,7 @@ async def _fix_caca_palavras_digital_bg():
                 LEFT JOIN produtos pr ON ap.produto_id = pr.id
                 WHERE a.ml_id IS NOT NULL AND a.ml_id != ''
                   AND a.status != 'deletado'
+                  AND a.tipo = 'fisico'
                   AND (
                     k.nome ILIKE '%palavras%'
                     OR a.titulo ILIKE '%palavras%'
