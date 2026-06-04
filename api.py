@@ -1816,10 +1816,23 @@ async def debug_cp_query(_=Depends(_require_auth)):
             kits_cp = _row_val(cur.fetchone())
             cur.execute("SELECT COUNT(*) as cnt FROM anuncios WHERE titulo ILIKE '%palavras%' AND ml_id IS NOT NULL")
             titulos_cp = _row_val(cur.fetchone())
-            cur.execute("SELECT a.id, a.tipo, a.titulo FROM anuncios a LEFT JOIN kits k ON a.kit_id = k.id WHERE k.nome ILIKE '%palavras%' AND a.ml_id IS NOT NULL LIMIT 5")
-            rows = cur.fetchall()
-            exemplos = [{"id": r["id"] if isinstance(r, dict) else r[0], "tipo": r["tipo"] if isinstance(r, dict) else r[1], "titulo": (r["titulo"] if isinstance(r, dict) else r[2])[:50]} for r in rows]
-            return {"total_anuncios": total, "kits_cp_nome": kits_cp, "anuncios_titulo_palavras": titulos_cp, "exemplos_via_kit": exemplos}
+            cur.execute("""
+                SELECT a.tipo, COUNT(*) as cnt FROM anuncios a
+                LEFT JOIN kits k ON a.kit_id = k.id
+                WHERE (k.nome ILIKE '%palavras%' OR a.titulo ILIKE '%palavras%')
+                  AND a.ml_id IS NOT NULL AND a.status != 'deletado'
+                GROUP BY a.tipo
+            """)
+            por_tipo = {(r["tipo"] if isinstance(r, dict) else r[0]): _row_val(r) for r in cur.fetchall()}
+            cur.execute("""
+                SELECT a.id, a.tipo, a.titulo FROM anuncios a
+                LEFT JOIN kits k ON a.kit_id = k.id
+                WHERE (k.nome ILIKE '%palavras%' OR a.titulo ILIKE '%palavras%')
+                  AND a.ml_id IS NOT NULL AND a.status != 'deletado' AND a.tipo = 'fisico'
+                LIMIT 5
+            """)
+            fisicos = [{"id": r["id"] if isinstance(r, dict) else r[0], "titulo": (r["titulo"] if isinstance(r, dict) else r[2])[:50]} for r in cur.fetchall()]
+            return {"total_anuncios": total, "kits_cp_nome": kits_cp, "anuncios_titulo_palavras": titulos_cp, "por_tipo": por_tipo, "exemplos_fisico": fisicos}
     return await asyncio.to_thread(_run)
 
 
