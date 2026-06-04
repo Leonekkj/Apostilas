@@ -25,6 +25,7 @@ from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -70,9 +71,18 @@ def _pdf_path_to_url(pdf_path: str) -> str | None:
         return None
 
 
+_scheduler = AsyncIOScheduler()
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     await asyncio.to_thread(database.criar_tabelas)
+    # Fixes diários: 3h da manhã (horário servidor = UTC)
+    _scheduler.add_job(_fix_titulos_bg, "cron", hour=3, minute=0, id="fix_titulos")
+    _scheduler.add_job(_fix_caca_palavras_digital_bg, "cron", hour=3, minute=15, id="fix_cp_digital")
+    _scheduler.add_job(_fix_imagens_pillow_bg, "cron", hour=4, minute=0, id="fix_imagens")
+    _scheduler.start()
+    print("[scheduler] Jobs diários registrados: fix_titulos, fix_cp_digital, fix_imagens")
 
 
 # ---------------------------------------------------------------------------
@@ -1584,6 +1594,65 @@ async def _fix_caca_palavras_digital_bg():
     print(f"[fix-cp-digital] corrigidos={len(corrigidos)} erros={len(erros)} total={len(anuncios)}")
 
 
+async def _fix_imagens_pillow_bg():
+    """Detecta anúncios publicados com imagem local (apagada pelo Render) e regenera via AI → R2."""
+    from database import _get_conn, _cursor, PH, _rows_to_dicts
+    import storage as _storage
+
+    def _buscar_sem_imagem_r2():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(f"""
+                SELECT id, apostila_id, kit_id, titulo, variacao, topico_id, num_exercicios
+                FROM anuncios
+                WHERE ml_id IS NOT NULL AND ml_id != ''
+                  AND status = 'publicado'
+                  AND (
+                    imagem_path IS NULL
+                    OR imagem_path = ''
+                    OR imagem_path LIKE '/opt/render%'
+                    OR imagem_path LIKE 'C:%'
+                  )
+                LIMIT 50
+            """)
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    anuncios = _buscar_sem_imagem_r2()
+    print(f"[fix-imagens] {len(anuncios)} anúncios com imagem local/ausente para regenerar")
+
+    regenerados = 0
+    for an in anuncios:
+        try:
+            from generator import images as gen_images
+            apostila_id = an.get("apostila_id")
+            kit_id = an.get("kit_id")
+            variacao = an.get("variacao") or 1
+
+            if apostila_id:
+                topico = {"id": an.get("topico_id"), "nome": an.get("titulo", ""), "slug": "geral"}
+                num_ex = an.get("num_exercicios") or 60
+                paths = await asyncio.to_thread(gen_images.gerar_capas, apostila_id, topico, num_ex)
+            elif kit_id:
+                kit = database.buscar_kit(kit_id)
+                if not kit:
+                    continue
+                apostilas = [database.buscar_apostila_por_id(aid) for aid in kit.get("apostila_ids_list", [])]
+                apostilas = [a for a in apostilas if a]
+                paths = await asyncio.to_thread(gen_images.gerar_capas_kit, kit_id, kit.get("nome", ""), apostilas, variacao)
+            else:
+                continue
+
+            if paths:
+                r2_url = await asyncio.to_thread(_storage.upload, paths[0])
+                await asyncio.to_thread(database.atualizar_anuncio, an["id"], imagem_path=r2_url)
+                regenerados += 1
+        except Exception as e:
+            print(f"[fix-imagens] erro anuncio_id={an['id']}: {e}")
+        await asyncio.sleep(2)
+
+    print(f"[fix-imagens] regenerados={regenerados}/{len(anuncios)}")
+
+
 async def _fix_titulos_bg():
     from ml import auth as ml_auth
     import requests as _req
@@ -1720,6 +1789,13 @@ async def _fix_categoria_bg():
         import time; time.sleep(0.5)
 
     print(f"[fix-categoria] republicados={len(republicados)} erros={len(erros)}")
+
+
+@app.post("/api/admin/fix-imagens")
+async def fix_imagens(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """Regenera imagens de anúncios publicados com path local (apagado pelo Render) via AI → R2."""
+    background_tasks.add_task(_fix_imagens_pillow_bg)
+    return {"ok": True, "msg": "Regeneração de imagens iniciada em background (50 por vez)"}
 
 
 @app.post("/api/admin/fix-caca-palavras-digital")
