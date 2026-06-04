@@ -1801,32 +1801,19 @@ async def fix_imagens(background_tasks: BackgroundTasks, _=Depends(_require_auth
 @app.get("/api/admin/debug-cp-query")
 async def debug_cp_query(_=Depends(_require_auth)):
     """Testa a query do fix-caca-palavras e retorna quantos itens encontra."""
-    from database import _get_conn, _cursor, _rows_to_dicts
     def _run():
-        with _get_conn() as conn:
-            cur = _cursor(conn)
-            cur.execute("""
-                SELECT a.id, a.tipo, a.titulo, k.nome as kit_nome
-                FROM anuncios a
-                LEFT JOIN kits k ON a.kit_id = k.id
-                LEFT JOIN apostilas ap ON a.apostila_id = ap.id
-                LEFT JOIN produtos pr ON ap.produto_id = pr.id
-                WHERE a.ml_id IS NOT NULL AND a.ml_id != ''
-                  AND a.status != 'deletado'
-                  AND (
-                    k.nome ILIKE '%palavras%'
-                    OR a.titulo ILIKE '%palavras%'
-                    OR pr.nome ILIKE '%palavras%'
-                  )
-            """)
-            return _rows_to_dicts(cur.fetchall(), cur)
-    rows = await asyncio.to_thread(_run)
-    return {
-        "total": len(rows),
-        "fisico": len([r for r in rows if r.get("tipo") == "fisico"]),
-        "digital": len([r for r in rows if r.get("tipo") == "digital"]),
-        "exemplos": [{"id": r["id"], "tipo": r["tipo"], "titulo": r["titulo"][:50], "kit_nome": r.get("kit_nome", "")[:40]} for r in rows[:5]],
-    }
+        with database._get_conn() as conn:
+            cur = database._cursor(conn)
+            cur.execute("SELECT COUNT(*) FROM anuncios WHERE ml_id IS NOT NULL AND ml_id != '' AND status != 'deletado'")
+            total = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM kits WHERE nome ILIKE '%palavras%'")
+            kits_cp = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM anuncios WHERE titulo ILIKE '%palavras%' AND ml_id IS NOT NULL")
+            titulos_cp = cur.fetchone()[0]
+            cur.execute("SELECT id, tipo, titulo FROM anuncios WHERE titulo ILIKE '%palavras%' AND ml_id IS NOT NULL LIMIT 3")
+            exemplos = [{"id": r[0], "tipo": r[1], "titulo": r[2][:50]} for r in cur.fetchall()]
+            return {"total_anuncios": total, "kits_cp_nome": kits_cp, "anuncios_titulo_palavras": titulos_cp, "exemplos": exemplos}
+    return await asyncio.to_thread(_run)
 
 
 @app.post("/api/admin/fix-caca-palavras-digital")
