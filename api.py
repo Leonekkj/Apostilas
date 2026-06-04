@@ -1801,18 +1801,25 @@ async def fix_imagens(background_tasks: BackgroundTasks, _=Depends(_require_auth
 @app.get("/api/admin/debug-cp-query")
 async def debug_cp_query(_=Depends(_require_auth)):
     """Testa a query do fix-caca-palavras e retorna quantos itens encontra."""
+    def _row_val(row):
+        """Extrai primeiro valor de row (dict no PG, tuple no SQLite)."""
+        if isinstance(row, dict):
+            return next(iter(row.values()))
+        return row[0]
+
     def _run():
         with database._get_conn() as conn:
             cur = database._cursor(conn)
-            cur.execute("SELECT COUNT(*) FROM anuncios WHERE ml_id IS NOT NULL AND ml_id != '' AND status != 'deletado'")
-            total = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM kits WHERE nome ILIKE '%palavras%'")
-            kits_cp = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM anuncios WHERE titulo ILIKE '%palavras%' AND ml_id IS NOT NULL")
-            titulos_cp = cur.fetchone()[0]
-            cur.execute("SELECT id, tipo, titulo FROM anuncios WHERE titulo ILIKE '%palavras%' AND ml_id IS NOT NULL LIMIT 3")
-            exemplos = [{"id": r[0], "tipo": r[1], "titulo": r[2][:50]} for r in cur.fetchall()]
-            return {"total_anuncios": total, "kits_cp_nome": kits_cp, "anuncios_titulo_palavras": titulos_cp, "exemplos": exemplos}
+            cur.execute("SELECT COUNT(*) as cnt FROM anuncios WHERE ml_id IS NOT NULL AND ml_id != '' AND status != 'deletado'")
+            total = _row_val(cur.fetchone())
+            cur.execute("SELECT COUNT(*) as cnt FROM kits WHERE nome ILIKE '%palavras%'")
+            kits_cp = _row_val(cur.fetchone())
+            cur.execute("SELECT COUNT(*) as cnt FROM anuncios WHERE titulo ILIKE '%palavras%' AND ml_id IS NOT NULL")
+            titulos_cp = _row_val(cur.fetchone())
+            cur.execute("SELECT a.id, a.tipo, a.titulo FROM anuncios a LEFT JOIN kits k ON a.kit_id = k.id WHERE k.nome ILIKE '%palavras%' AND a.ml_id IS NOT NULL LIMIT 5")
+            rows = cur.fetchall()
+            exemplos = [{"id": r["id"] if isinstance(r, dict) else r[0], "tipo": r["tipo"] if isinstance(r, dict) else r[1], "titulo": (r["titulo"] if isinstance(r, dict) else r[2])[:50]} for r in rows]
+            return {"total_anuncios": total, "kits_cp_nome": kits_cp, "anuncios_titulo_palavras": titulos_cp, "exemplos_via_kit": exemplos}
     return await asyncio.to_thread(_run)
 
 
