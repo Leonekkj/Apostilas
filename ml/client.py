@@ -81,6 +81,90 @@ def _get_brand_images() -> list[str]:
     return [os.path.join(_BRAND_DIR, f) for f in files[:3]]
 
 
+def _garantir_titulo_unico(titulo: str, anuncio_id: int) -> str:
+    """Garante que nenhum outro anúncio publicado tem o mesmo título, adicionando Vol. N se necessário."""
+    import re
+
+    def _count(t: str) -> int:
+        with database._get_conn() as conn:
+            cur = database._cursor(conn)
+            cur.execute(
+                f"SELECT COUNT(*) as cnt FROM anuncios WHERE titulo = {database.PH} AND ml_id IS NOT NULL AND status = 'publicado' AND id != {database.PH}",
+                [t, anuncio_id],
+            )
+            row = cur.fetchone()
+            return row["cnt"] if isinstance(row, dict) else row[0]
+
+    if _count(titulo) == 0:
+        return titulo
+
+    base = re.sub(r'\s+Vol\.\s*\d+$', '', titulo, flags=re.IGNORECASE).strip()
+    for n in range(2, 30):
+        sufixo = f" Vol. {n}"
+        candidato = (base[:60 - len(sufixo)].rsplit(" ", 1)[0] + sufixo)[:60]
+        if _count(candidato) == 0:
+            print(f"[ML] título duplicado resolvido: {titulo!r} → {candidato!r}")
+            return candidato
+    return titulo
+
+
+def _garantir_imagem_unica(imagem_path: str, anuncio_id: int, anuncio: dict) -> str:
+    """Se outro anúncio publicado já usa esta imagem, tenta outra variação ou regenera."""
+    if not imagem_path:
+        return imagem_path
+
+    import re
+    import storage as _storage
+
+    def _count(p: str) -> int:
+        with database._get_conn() as conn:
+            cur = database._cursor(conn)
+            cur.execute(
+                f"SELECT COUNT(*) as cnt FROM anuncios WHERE imagem_path = {database.PH} AND ml_id IS NOT NULL AND status = 'publicado' AND id != {database.PH}",
+                [p, anuncio_id],
+            )
+            row = cur.fetchone()
+            return row["cnt"] if isinstance(row, dict) else row[0]
+
+    if _count(imagem_path) == 0:
+        return imagem_path
+
+    # Tenta variações _v1 a _v6
+    match = re.search(r'_v(\d+)\.(png|jpg)$', imagem_path)
+    if match:
+        base_path = imagem_path[:match.start()]
+        ext = match.group(2)
+        current_v = int(match.group(1))
+        for v in [1, 2, 3, 4, 5, 6]:
+            if v == current_v:
+                continue
+            candidate = f"{base_path}_v{v}.{ext}"
+            exists = _storage.is_url(candidate) or os.path.exists(candidate)
+            if exists and _count(candidate) == 0:
+                database.atualizar_anuncio(anuncio_id, imagem_path=candidate)
+                print(f"[ML] imagem duplicada resolvida: _v{current_v} → _v{v}")
+                return candidate
+
+    # Regenera com próxima paleta
+    try:
+        from generator import images as _gen_images
+        variacao_atual = anuncio.get("variacao") or 1
+        nova_variacao = (variacao_atual % 6) + 1
+        apostila_id = anuncio.get("apostila_id")
+        kit_id = anuncio.get("kit_id")
+        if apostila_id:
+            topico_dict = {"id": anuncio.get("topico_id"), "nome": anuncio.get("topico_nome", ""), "slug": anuncio.get("topico_slug", "geral")}
+            paths = _gen_images.gerar_capas(apostila_id, topico_dict, anuncio.get("num_exercicios") or 60, variacao=nova_variacao)
+            if paths and _count(paths[0]) == 0:
+                database.atualizar_anuncio(anuncio_id, imagem_path=paths[0])
+                print(f"[ML] imagem regenerada paleta {nova_variacao}: {paths[0]}")
+                return paths[0]
+    except Exception as e:
+        print(f"[ML] falha ao regenerar imagem única: {e}")
+
+    return imagem_path
+
+
 def publicar_anuncio(anuncio_id: int) -> str:
     """
     Publishes a single anuncio to Mercado Livre.
@@ -172,6 +256,15 @@ def publicar_anuncio(anuncio_id: int) -> str:
                     print(f"[ML] imagens kit geradas: {all_paths}")
             except Exception as _e:
                 print(f"[ML] falha ao gerar imagem kit on-demand: {_e}")
+
+        # Garante unicidade de título e imagem antes de publicar
+        titulo_db = anuncio.get("titulo", "")
+        titulo_unico = _garantir_titulo_unico(titulo_db, anuncio_id)
+        if titulo_unico != titulo_db:
+            database.atualizar_anuncio(anuncio_id, titulo=titulo_unico)
+            anuncio["titulo"] = titulo_unico
+
+        imagem_path = _garantir_imagem_unica(imagem_path, anuncio_id, anuncio)
 
         picture_ids = _upload_pictures(token, imagem_path)
         if not picture_ids:
