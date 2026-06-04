@@ -1689,6 +1689,90 @@ async def _fix_forbidden_deletados_bg():
     print(f"[fix-forbidden] deletados={len(deletados)} republicados={len(republicados)} erros={len(erros)}")
 
 
+@app.post("/api/admin/fix-waiting-for-patch")
+async def fix_waiting_for_patch(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """
+    Fecha anúncios under_review/waiting_for_patch no ML e re-publica como digital.
+    Necessário porque anúncios criados como físico não podem ser convertidos via PUT simples.
+    """
+    background_tasks.add_task(_fix_waiting_for_patch_bg)
+    return {"ok": True, "msg": "Fix waiting_for_patch iniciado em background"}
+
+
+async def _fix_waiting_for_patch_bg():
+    from ml import auth as ml_auth
+    import requests as _req
+    import ml.client as ml_client
+    from database import _get_conn, _cursor, PH, _rows_to_dicts
+
+    token = await asyncio.to_thread(ml_auth.get_valid_token)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def _buscar_todos():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute("SELECT id, ml_id, titulo, tipo FROM anuncios WHERE ml_id IS NOT NULL AND ml_id != '' AND status != 'deletado'")
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    anuncios = await asyncio.to_thread(_buscar_todos)
+    ml_ids = [a["ml_id"] for a in anuncios]
+    id_map = {a["ml_id"]: a for a in anuncios}
+
+    # Encontra todos os waiting_for_patch
+    waiting = []
+    for i in range(0, len(ml_ids), 20):
+        chunk = ml_ids[i:i + 20]
+        resp = await asyncio.to_thread(
+            lambda c=chunk: _req.get(
+                "https://api.mercadolibre.com/items",
+                params={"ids": ",".join(c), "attributes": "id,status,sub_status"},
+                headers=headers, timeout=15,
+            )
+        )
+        for entry in resp.json():
+            if not isinstance(entry, dict) or entry.get("code") != 200:
+                continue
+            item = entry["body"]
+            subs = item.get("sub_status") or []
+            if "waiting_for_patch" in subs and item.get("status") == "under_review":
+                waiting.append(id_map[item["id"]])
+        await asyncio.sleep(0.2)
+
+    print(f"[fix-wfp] encontrados {len(waiting)} waiting_for_patch para fechar e re-publicar")
+
+    def _fechar_e_limpar(anuncio_id, ml_id):
+        # Fecha no ML
+        _req.put(
+            f"https://api.mercadolibre.com/items/{ml_id}",
+            json={"status": "closed"},
+            headers=headers,
+            timeout=15,
+        )
+        # Limpa no banco
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(f"UPDATE anuncios SET ml_id = NULL, status = 'rascunho', erro_msg = NULL WHERE id = {PH}", [anuncio_id])
+            conn.commit()
+
+    fechados = 0
+    republicados = []
+    erros = []
+
+    for an in waiting:
+        try:
+            await asyncio.to_thread(_fechar_e_limpar, an["id"], an["ml_id"])
+            fechados += 1
+            await asyncio.sleep(0.3)
+            novo_ml_id = await asyncio.to_thread(ml_client.publicar_anuncio, an["id"])
+            republicados.append({"anuncio_id": an["id"], "novo_ml_id": novo_ml_id})
+        except Exception as e:
+            erros.append({"anuncio_id": an["id"], "erro": str(e)[:200]})
+            print(f"[fix-wfp] erro anuncio_id={an['id']}: {e}")
+        await asyncio.sleep(0.5)
+
+    print(f"[fix-wfp] fechados={fechados} republicados={len(republicados)} erros={len(erros)}")
+
+
 async def _fix_caca_palavras_digital_bg():
     from ml import auth as ml_auth
     import requests as _req
