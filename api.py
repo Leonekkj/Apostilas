@@ -1517,6 +1517,90 @@ async def ml_problemas(_=Depends(_require_auth)):
     }
 
 
+@app.get("/api/admin/ml-forbidden-detalhe")
+async def ml_forbidden_detalhe(_=Depends(_require_auth)):
+    """Busca detalhes completos dos itens com sub_status forbidden para entender o motivo real."""
+    from ml import auth as ml_auth
+    import requests as _req
+    from database import _get_conn, _cursor, _rows_to_dicts
+
+    token = await asyncio.to_thread(ml_auth.get_valid_token)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def _buscar_forbidden_ids():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute("SELECT id, ml_id, titulo, tipo FROM anuncios WHERE ml_id IS NOT NULL AND ml_id != '' AND status != 'deletado'")
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    anuncios = await asyncio.to_thread(_buscar_forbidden_ids)
+    ml_ids = [a["ml_id"] for a in anuncios]
+    id_map = {a["ml_id"]: a for a in anuncios}
+
+    # Primeiro passo: encontra todos os forbidden
+    forbidden_ids = []
+    for i in range(0, len(ml_ids), 20):
+        chunk = ml_ids[i:i + 20]
+        resp = await asyncio.to_thread(
+            lambda c=chunk: _req.get(
+                "https://api.mercadolibre.com/items",
+                params={"ids": ",".join(c), "attributes": "id,status,sub_status"},
+                headers=headers, timeout=15,
+            )
+        )
+        for entry in resp.json():
+            if not isinstance(entry, dict) or entry.get("code") != 200:
+                continue
+            item = entry["body"]
+            subs = item.get("sub_status") or []
+            if "forbidden" in subs:
+                forbidden_ids.append(item["id"])
+        await asyncio.sleep(0.2)
+
+    # Segundo passo: busca detalhes completos de cada forbidden (tags, health, cause)
+    detalhes = []
+    for ml_id in forbidden_ids[:150]:  # limita 150
+        resp = await asyncio.to_thread(
+            lambda mid=ml_id: _req.get(
+                f"https://api.mercadolibre.com/items/{mid}",
+                params={"attributes": "id,status,sub_status,title,tags,health,cause,category_id,listing_type_id"},
+                headers=headers, timeout=15,
+            )
+        )
+        item = resp.json()
+        an = id_map.get(ml_id, {})
+        detalhes.append({
+            "ml_id": ml_id,
+            "anuncio_id": an.get("id"),
+            "titulo_db": (an.get("titulo") or "")[:60],
+            "tipo_db": an.get("tipo"),
+            "titulo_ml": (item.get("title") or "")[:60],
+            "status": item.get("status"),
+            "sub_status": item.get("sub_status") or [],
+            "tags": item.get("tags") or [],
+            "health": item.get("health"),
+            "cause": item.get("cause"),
+            "category_id": item.get("category_id"),
+        })
+        await asyncio.sleep(0.15)
+
+    # Agrupa por tags (principal indicador do problema real)
+    por_tags: dict = {}
+    for d in detalhes:
+        chave = str(sorted(d["tags"])) if d["tags"] else "sem_tags"
+        por_tags.setdefault(chave, []).append(d)
+
+    return {
+        "total_forbidden": len(forbidden_ids),
+        "analisados": len(detalhes),
+        "por_tags": {
+            k: {"quantidade": len(v), "exemplos": v[:3]}
+            for k, v in sorted(por_tags.items(), key=lambda x: -len(x[1]))
+        },
+        "lista_completa": detalhes,
+    }
+
+
 async def _fix_caca_palavras_digital_bg():
     from ml import auth as ml_auth
     import requests as _req
