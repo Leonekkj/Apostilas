@@ -1561,35 +1561,36 @@ async def _fix_caca_palavras_digital_bg():
             t = (t + sufixo)[:60]
         return t[:60]
 
-    anuncios = _buscar_cp()
+    anuncios = await asyncio.to_thread(_buscar_cp)
     corrigidos = []
     erros = []
 
-    for an in anuncios:
-        novo_titulo = _fix_titulo(an["titulo"])
-        novo_tipo = "digital"
-
-        # Atualiza banco
+    def _atualizar_db(anuncio_id, novo_tipo, novo_titulo):
         with _get_conn() as conn:
             cur = _cursor(conn)
             cur.execute(
                 f"UPDATE anuncios SET tipo = {PH}, titulo = {PH} WHERE id = {PH}",
-                [novo_tipo, novo_titulo, an["id"]],
+                [novo_tipo, novo_titulo, anuncio_id],
             )
             conn.commit()
 
-        # Atualiza ML
-        r = _req.put(
-            f"https://api.mercadolibre.com/items/{an['ml_id']}",
+    def _put_ml(ml_id, novo_titulo, hdrs):
+        return _req.put(
+            f"https://api.mercadolibre.com/items/{ml_id}",
             json={"title": novo_titulo, "category_id": "MLB1227"},
-            headers=headers,
+            headers=hdrs,
             timeout=15,
         )
+
+    for an in anuncios:
+        novo_titulo = _fix_titulo(an["titulo"])
+        await asyncio.to_thread(_atualizar_db, an["id"], "digital", novo_titulo)
+        r = await asyncio.to_thread(_put_ml, an["ml_id"], novo_titulo, headers)
         if r.status_code in (200, 201):
             corrigidos.append({"anuncio_id": an["id"], "ml_id": an["ml_id"], "novo_titulo": novo_titulo})
         else:
             erros.append({"anuncio_id": an["id"], "ml_id": an["ml_id"], "erro": r.text[:200]})
-        import time; time.sleep(0.4)
+        await asyncio.sleep(0.4)
 
     print(f"[fix-cp-digital] corrigidos={len(corrigidos)} erros={len(erros)} total={len(anuncios)}")
 
@@ -1682,7 +1683,7 @@ async def _fix_titulos_bg():
             """)
             return _rows_to_dicts(cur.fetchall(), cur)
 
-    duplicados = _buscar_duplicados()
+    duplicados = await asyncio.to_thread(_buscar_duplicados)
 
     # Agrupa por título
     por_titulo: dict = {}
@@ -1692,14 +1693,26 @@ async def _fix_titulos_bg():
     corrigidos = []
     erros = []
 
+    def _upd_titulo_db(anuncio_id, novo_titulo):
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(f"UPDATE anuncios SET titulo = {PH} WHERE id = {PH}", [novo_titulo, anuncio_id])
+            conn.commit()
+
+    def _put_titulo_ml(ml_id, novo_titulo, hdrs):
+        return _req.put(
+            f"https://api.mercadolibre.com/items/{ml_id}",
+            json={"title": novo_titulo},
+            headers=hdrs,
+            timeout=15,
+        )
+
     for titulo_orig, grupo in por_titulo.items():
         for idx, an in enumerate(grupo, start=1):
-            # Gera título único: adiciona Vol. N ou total de exercícios
             num_ex = an.get("num_exercicios") or 0
             variacao = an.get("variacao") or idx
 
             base = titulo_orig
-            # Remove sufixos antigos de vol. se existir
             for suf in [" Vol. 1", " Vol. 2", " Vol. 3", " - Vol. 1", " - Vol. 2", " - Vol. 3"]:
                 base = base.replace(suf, "")
             base = base.strip()
@@ -1713,24 +1726,13 @@ async def _fix_titulos_bg():
             if novo_titulo == titulo_orig:
                 continue
 
-            # Atualiza no banco
-            with _get_conn() as conn:
-                cur = _cursor(conn)
-                cur.execute(f"UPDATE anuncios SET titulo = {PH} WHERE id = {PH}", [novo_titulo, an["id"]])
-                conn.commit()
-
-            # Atualiza no ML
-            r = _req.put(
-                f"https://api.mercadolibre.com/items/{an['ml_id']}",
-                json={"title": novo_titulo},
-                headers=headers,
-                timeout=15,
-            )
+            await asyncio.to_thread(_upd_titulo_db, an["id"], novo_titulo)
+            r = await asyncio.to_thread(_put_titulo_ml, an["ml_id"], novo_titulo, headers)
             if r.status_code in (200, 201):
                 corrigidos.append({"anuncio_id": an["id"], "ml_id": an["ml_id"], "novo_titulo": novo_titulo})
             else:
                 erros.append({"anuncio_id": an["id"], "ml_id": an["ml_id"], "erro": r.text[:200]})
-            import time; time.sleep(0.4)
+            await asyncio.sleep(0.4)
 
     print(f"[fix-titulos] corrigidos={len(corrigidos)} erros={len(erros)}")
 
@@ -1823,7 +1825,7 @@ async def debug_cp_query(_=Depends(_require_auth)):
                   AND a.ml_id IS NOT NULL AND a.status != 'deletado'
                 GROUP BY a.tipo
             """)
-            por_tipo = {(r["tipo"] if isinstance(r, dict) else r[0]): _row_val(r) for r in cur.fetchall()}
+            por_tipo = {(r["tipo"] if isinstance(r, dict) else r[0]): (r["cnt"] if isinstance(r, dict) else r[1]) for r in cur.fetchall()}
             cur.execute("""
                 SELECT a.id, a.tipo, a.titulo FROM anuncios a
                 LEFT JOIN kits k ON a.kit_id = k.id
