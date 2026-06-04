@@ -1689,6 +1689,58 @@ async def _fix_forbidden_deletados_bg():
     print(f"[fix-forbidden] deletados={len(deletados)} republicados={len(republicados)} erros={len(erros)}")
 
 
+@app.post("/api/admin/reverter-para-fisico")
+async def reverter_para_fisico(_=Depends(_require_auth)):
+    """
+    Reverte toda a base para produto físico:
+    - tipo='fisico' em todos os anúncios
+    - Remove 'PDF' e 'Digital' dos títulos
+    - Arquiva caça-palavras (status='arquivado', ml_id=NULL) — não re-publica no ML
+    """
+    import re
+    from database import _get_conn, _cursor, PH, _rows_to_dicts
+
+    def _run():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+
+            # 1. Todos para fisico
+            cur.execute("UPDATE anuncios SET tipo = 'fisico' WHERE tipo != 'fisico' AND status != 'deletado'")
+            fisico_count = cur.rowcount
+
+            # 2. Remove PDF/Digital dos títulos
+            cur.execute("SELECT id, titulo FROM anuncios WHERE status != 'deletado' AND status != 'arquivado'")
+            rows = _rows_to_dicts(cur.fetchall(), cur)
+            titulo_count = 0
+            for row in rows:
+                titulo = row["titulo"] or ""
+                novo = re.sub(r'\s*PDF\s*Digital\b', '', titulo, flags=re.IGNORECASE)
+                novo = re.sub(r'\bPDF\b', '', novo, flags=re.IGNORECASE)
+                novo = re.sub(r'\bDigital\b', '', novo, flags=re.IGNORECASE)
+                novo = re.sub(r'\s+', ' ', novo).strip().strip('-').strip()
+                novo = novo[:60]
+                if novo != titulo:
+                    cur.execute(f"UPDATE anuncios SET titulo = {PH} WHERE id = {PH}", [novo, row["id"]])
+                    titulo_count += 1
+
+            # 3. Arquiva caça-palavras — identifica por kit/apostila/título
+            cur.execute("""
+                UPDATE anuncios SET status = 'arquivado', ml_id = NULL
+                WHERE status NOT IN ('deletado', 'arquivado')
+                  AND (
+                    titulo ILIKE '%palavras%'
+                    OR kit_id IN (SELECT id FROM kits WHERE nome ILIKE '%palavras%')
+                  )
+            """)
+            cp_count = cur.rowcount
+
+            conn.commit()
+            return {"fisico_revertidos": fisico_count, "titulos_corrigidos": titulo_count, "cp_arquivados": cp_count}
+
+    resultado = await asyncio.to_thread(_run)
+    return {"ok": True, **resultado}
+
+
 @app.post("/api/admin/fix-waiting-for-patch")
 async def fix_waiting_for_patch(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
     """
