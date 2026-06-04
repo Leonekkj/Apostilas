@@ -1601,6 +1601,94 @@ async def ml_forbidden_detalhe(_=Depends(_require_auth)):
     }
 
 
+@app.post("/api/admin/fix-forbidden-deletados")
+async def fix_forbidden_deletados(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """
+    Para itens com forbidden+suspended_for_prevention+deleted no ML:
+    - tipo=importado → marca como deletado no banco (listagens antigas sem substituto)
+    - tipo=digital   → limpa ml_id + re-publica em categoria correta (MLB1227)
+    - tipo=fisico    → marca como deletado no banco
+    """
+    background_tasks.add_task(_fix_forbidden_deletados_bg)
+    return {"ok": True, "msg": "Fix forbidden+deletados iniciado em background"}
+
+
+async def _fix_forbidden_deletados_bg():
+    from ml import auth as ml_auth
+    import requests as _req
+    import ml.client as ml_client
+    from database import _get_conn, _cursor, PH, _rows_to_dicts
+
+    token = await asyncio.to_thread(ml_auth.get_valid_token)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    def _buscar_todos():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute("SELECT id, ml_id, titulo, tipo FROM anuncios WHERE ml_id IS NOT NULL AND ml_id != '' AND status != 'deletado'")
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    anuncios = await asyncio.to_thread(_buscar_todos)
+    ml_ids = [a["ml_id"] for a in anuncios]
+    id_map = {a["ml_id"]: a for a in anuncios}
+
+    # Coleta todos os ml_ids com forbidden+suspended+deleted
+    forbidden_deletados = []
+    for i in range(0, len(ml_ids), 20):
+        chunk = ml_ids[i:i + 20]
+        resp = await asyncio.to_thread(
+            lambda c=chunk: _req.get(
+                "https://api.mercadolibre.com/items",
+                params={"ids": ",".join(c), "attributes": "id,status,sub_status"},
+                headers=headers, timeout=15,
+            )
+        )
+        for entry in resp.json():
+            if not isinstance(entry, dict) or entry.get("code") != 200:
+                continue
+            item = entry["body"]
+            subs = set(item.get("sub_status") or [])
+            if "forbidden" in subs and "deleted" in subs:
+                forbidden_deletados.append(id_map[item["id"]])
+        await asyncio.sleep(0.2)
+
+    print(f"[fix-forbidden] encontrados {len(forbidden_deletados)} forbidden+deleted")
+
+    def _marcar_deletado(anuncio_id):
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(f"UPDATE anuncios SET status = 'deletado', ml_id = NULL WHERE id = {PH}", [anuncio_id])
+            conn.commit()
+
+    def _limpar_para_republicar(anuncio_id):
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(f"UPDATE anuncios SET ml_id = NULL, status = 'rascunho', erro_msg = NULL WHERE id = {PH}", [anuncio_id])
+            conn.commit()
+
+    deletados = []
+    republicados = []
+    erros = []
+
+    for an in forbidden_deletados:
+        tipo = an.get("tipo") or ""
+        anuncio_id = an["id"]
+
+        if tipo in ("importado", "fisico"):
+            await asyncio.to_thread(_marcar_deletado, anuncio_id)
+            deletados.append(anuncio_id)
+        elif tipo == "digital":
+            await asyncio.to_thread(_limpar_para_republicar, anuncio_id)
+            try:
+                novo_ml_id = await asyncio.to_thread(ml_client.publicar_anuncio, anuncio_id)
+                republicados.append({"anuncio_id": anuncio_id, "novo_ml_id": novo_ml_id})
+            except Exception as e:
+                erros.append({"anuncio_id": anuncio_id, "erro": str(e)[:200]})
+            await asyncio.sleep(0.5)
+
+    print(f"[fix-forbidden] deletados={len(deletados)} republicados={len(republicados)} erros={len(erros)}")
+
+
 async def _fix_caca_palavras_digital_bg():
     from ml import auth as ml_auth
     import requests as _req
