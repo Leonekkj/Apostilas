@@ -276,7 +276,7 @@ def criar_tabelas() -> None:
         if USE_POSTGRES:
             sql_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations", "001_multi_marca.sql")
             if os.path.exists(sql_path):
-                with open(sql_path) as f:
+                with open(sql_path, encoding="utf-8") as f:
                     sql_content = f.read()
                 for stmt in sql_content.split(";"):
                     stmt = stmt.strip()
