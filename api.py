@@ -2548,6 +2548,106 @@ async def fix_titulos_duplicados(background_tasks: BackgroundTasks, _=Depends(_r
     return {"ok": True, "msg": "Correção de títulos duplicados iniciada em background"}
 
 
+@app.post("/api/admin/corrigir-forbidden-ml")
+async def corrigir_forbidden_ml(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """
+    Fecha anúncios under_review/forbidden no ML (categoria incorreta) e re-publica
+    com a categoria correta (MLB1726 para apostilas físicas).
+    """
+    background_tasks.add_task(_corrigir_forbidden_ml_bg)
+    return {"ok": True, "msg": "Correção de forbidden iniciada em background — verifique os logs"}
+
+
+async def _corrigir_forbidden_ml_bg():
+    import requests as _req
+    from ml import auth as ml_auth, client as ml_client
+    from database import _get_conn, _cursor, PH, _rows_to_dicts, atualizar_anuncio
+
+    try:
+        token = await asyncio.to_thread(ml_auth.get_valid_token)
+    except RuntimeError as e:
+        print(f"[forbidden] Token ML inválido: {e}")
+        return
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    # 1. Busca todos os anúncios com ml_id do banco
+    def _buscar():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(
+                "SELECT id, ml_id, titulo FROM anuncios "
+                "WHERE ml_id IS NOT NULL AND ml_id != '' "
+                "AND status NOT IN ('deletado', 'arquivado')"
+            )
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    todos = await asyncio.to_thread(_buscar)
+    ml_id_map = {a["ml_id"]: a for a in todos}
+    ml_ids = list(ml_id_map.keys())
+    print(f"[forbidden] {len(ml_ids)} anúncios com ml_id para verificar")
+
+    # 2. Busca status em lotes de 20 — filtra forbidden
+    forbidden_list = []
+    for i in range(0, len(ml_ids), 20):
+        batch = ml_ids[i:i+20]
+        r = await asyncio.to_thread(
+            lambda b=batch: _req.get(
+                f"{ml_client.ML_API_BASE}/items",
+                params={"ids": ",".join(b), "attributes": "id,status,sub_status"},
+                headers=headers, timeout=15,
+            )
+        )
+        await asyncio.sleep(0.3)
+        if r.status_code != 200:
+            continue
+        for entry in r.json():
+            item = entry.get("body", {})
+            sub = item.get("sub_status", [])
+            if "forbidden" in sub:
+                ml_id = item.get("id", "")
+                if ml_id and ml_id in ml_id_map:
+                    forbidden_list.append(ml_id_map[ml_id])
+
+    print(f"[forbidden] {len(forbidden_list)} anúncios forbidden encontrados")
+
+    ok = 0
+    erros = 0
+    for an in forbidden_list:
+        anuncio_id = an["id"]
+        ml_id_antigo = an["ml_id"]
+
+        # Fecha no ML
+        r_close = await asyncio.to_thread(
+            lambda mid=ml_id_antigo: _req.put(
+                f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
+                json={"status": "closed"},
+                headers=headers, timeout=10,
+            )
+        )
+        await asyncio.sleep(2)
+        if r_close.status_code not in (200, 400):
+            erros += 1
+            print(f"[forbidden] ERRO ao fechar {ml_id_antigo}: {r_close.status_code} {r_close.text[:150]}")
+            continue
+
+        # Limpa ml_id local
+        await asyncio.to_thread(lambda aid=anuncio_id: atualizar_anuncio(aid, ml_id="", status="rascunho"))
+
+        # Re-publica (publicar_anuncio usa MLB1726 como fallback para físico)
+        try:
+            novo_ml_id = await asyncio.to_thread(lambda aid=anuncio_id: ml_client.publicar_anuncio(aid))
+            ok += 1
+            print(f"[forbidden] OK {ml_id_antigo} → {novo_ml_id} ({an['titulo'][:40]})")
+        except Exception as e:
+            erros += 1
+            print(f"[forbidden] ERRO ao republicar anuncio_id={anuncio_id}: {e}")
+
+        await asyncio.sleep(3)
+
+    print(f"[forbidden] concluído — ok={ok} erros={erros}")
+
+
 @app.post("/api/admin/fix-categoria-incorreta")
 async def fix_categoria_incorreta(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
     """Detecta itens fechados por categoria incorreta no ML e os re-publica."""
