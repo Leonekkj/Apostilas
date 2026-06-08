@@ -2025,6 +2025,109 @@ async def _pausar_cp_ml_bg():
     print(f"[pausar-cp] concluído — fechados={fechados} erros={erros}")
 
 
+@app.post("/api/admin/reativar-waiting-patch")
+async def reativar_waiting_patch(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """
+    Fecha anúncios under_review/waiting_for_patch no ML e re-publica como FÍSICO.
+    Busca ml_ids em lotes de 20 para eficiência, depois fecha e republica um por um.
+    """
+    background_tasks.add_task(_reativar_waiting_patch_bg)
+    return {"ok": True, "msg": "Reativação waiting_for_patch iniciada em background — verifique os logs"}
+
+
+async def _reativar_waiting_patch_bg():
+    import requests as _req
+    from ml import auth as ml_auth, client as ml_client
+    import ml.client as _ml
+    from database import _get_conn, _cursor, PH, _rows_to_dicts, atualizar_anuncio
+
+    try:
+        token = await asyncio.to_thread(ml_auth.get_valid_token)
+    except RuntimeError as e:
+        print(f"[reativar-wp] Token ML inválido: {e}")
+        return
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    # 1. Busca todos os anúncios com ml_id do banco
+    def _buscar_com_ml_id():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(
+                "SELECT id, ml_id, titulo FROM anuncios "
+                "WHERE ml_id IS NOT NULL AND ml_id != '' "
+                "AND status NOT IN ('deletado', 'arquivado')"
+            )
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    todos = await asyncio.to_thread(_buscar_com_ml_id)
+    ml_id_map = {a["ml_id"]: a for a in todos}
+    ml_ids = list(ml_id_map.keys())
+    print(f"[reativar-wp] {len(ml_ids)} anúncios com ml_id para verificar")
+
+    # 2. Busca status em lotes de 20
+    waiting_patch = []
+    for i in range(0, len(ml_ids), 20):
+        batch = ml_ids[i:i+20]
+        r = await asyncio.to_thread(
+            lambda b=batch: _req.get(
+                f"{ml_client.ML_API_BASE}/items",
+                params={"ids": ",".join(b), "attributes": "id,status,sub_status"},
+                headers=headers, timeout=15,
+            )
+        )
+        await asyncio.sleep(0.5)
+        if r.status_code != 200:
+            print(f"[reativar-wp] ERRO no lote {i}: {r.status_code}")
+            continue
+        for entry in r.json():
+            item = entry.get("body", {})
+            sub = item.get("sub_status", [])
+            if "waiting_for_patch" in sub:
+                ml_id = item.get("id", "")
+                if ml_id and ml_id in ml_id_map:
+                    waiting_patch.append(ml_id_map[ml_id])
+
+    print(f"[reativar-wp] {len(waiting_patch)} anúncios waiting_for_patch encontrados")
+
+    # 3. Para cada: fecha no ML → limpa ml_id local → re-publica como físico
+    ok = 0
+    erros = 0
+    for an in waiting_patch:
+        anuncio_id = an["id"]
+        ml_id_antigo = an["ml_id"]
+
+        # Fecha listing antigo
+        r_close = await asyncio.to_thread(
+            lambda mid=ml_id_antigo: _req.put(
+                f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
+                json={"status": "closed"},
+                headers=headers, timeout=10,
+            )
+        )
+        await asyncio.sleep(2)
+        if r_close.status_code not in (200, 400):  # 400 = já fechado, ok
+            erros += 1
+            print(f"[reativar-wp] ERRO ao fechar {ml_id_antigo}: {r_close.status_code} {r_close.text[:150]}")
+            continue
+
+        # Limpa ml_id local para permitir re-publicação
+        await asyncio.to_thread(lambda aid=anuncio_id: atualizar_anuncio(aid, ml_id="", status="rascunho"))
+
+        # Re-publica como físico
+        try:
+            novo_ml_id = await asyncio.to_thread(lambda aid=anuncio_id: _ml.publicar_anuncio(aid))
+            ok += 1
+            print(f"[reativar-wp] OK {ml_id_antigo} → {novo_ml_id} ({an['titulo'][:40]})")
+        except Exception as e:
+            erros += 1
+            print(f"[reativar-wp] ERRO ao republicar anuncio_id={anuncio_id}: {e}")
+
+        await asyncio.sleep(3)
+
+    print(f"[reativar-wp] concluído — ok={ok} erros={erros}")
+
+
 @app.post("/api/admin/fix-waiting-for-patch")
 async def fix_waiting_for_patch(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
     """
