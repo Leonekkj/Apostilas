@@ -2548,6 +2548,93 @@ async def fix_titulos_duplicados(background_tasks: BackgroundTasks, _=Depends(_r
     return {"ok": True, "msg": "Correção de títulos duplicados iniciada em background"}
 
 
+@app.post("/api/admin/limpar-inativos-ml")
+async def limpar_inativos_ml(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """
+    Fecha no ML e arquiva localmente todos os anúncios com sub_status de problema
+    (forbidden, suspended_for_prevention, waiting_for_patch, deleted).
+    Não re-publica nada — limpeza total.
+    """
+    background_tasks.add_task(_limpar_inativos_ml_bg)
+    return {"ok": True, "msg": "Limpeza de inativos iniciada em background — verifique os logs"}
+
+
+async def _limpar_inativos_ml_bg():
+    import requests as _req
+    from ml import auth as ml_auth, client as ml_client
+    from database import _get_conn, _cursor, _rows_to_dicts, atualizar_anuncio
+
+    SUB_STATUS_PROBLEMAS = {"forbidden", "suspended_for_prevention", "waiting_for_patch", "deleted"}
+
+    try:
+        token = await asyncio.to_thread(ml_auth.get_valid_token)
+    except RuntimeError as e:
+        print(f"[limpar-inativos] Token ML inválido: {e}")
+        return
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    def _buscar():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(
+                "SELECT id, ml_id FROM anuncios "
+                "WHERE ml_id IS NOT NULL AND ml_id != '' "
+                "AND status NOT IN ('deletado', 'arquivado')"
+            )
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    todos = await asyncio.to_thread(_buscar)
+    ml_id_map = {a["ml_id"]: a for a in todos}
+    ml_ids = list(ml_id_map.keys())
+    print(f"[limpar-inativos] {len(ml_ids)} anúncios para verificar")
+
+    para_fechar = []
+    for i in range(0, len(ml_ids), 20):
+        batch = ml_ids[i:i+20]
+        r = await asyncio.to_thread(
+            lambda b=batch: _req.get(
+                f"{ml_client.ML_API_BASE}/items",
+                params={"ids": ",".join(b), "attributes": "id,status,sub_status"},
+                headers=headers, timeout=15,
+            )
+        )
+        await asyncio.sleep(0.3)
+        if r.status_code != 200:
+            continue
+        for entry in r.json():
+            item = entry.get("body", {})
+            sub = set(item.get("sub_status", []))
+            status = item.get("status", "")
+            if sub & SUB_STATUS_PROBLEMAS or status in ("closed", "inactive"):
+                ml_id = item.get("id", "")
+                if ml_id and ml_id in ml_id_map:
+                    para_fechar.append(ml_id_map[ml_id])
+
+    print(f"[limpar-inativos] {len(para_fechar)} anúncios problemáticos para fechar")
+
+    fechados = 0
+    erros = 0
+    for an in para_fechar:
+        # Tenta fechar no ML (ignora se já fechado)
+        r = await asyncio.to_thread(
+            lambda mid=an["ml_id"]: _req.put(
+                f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
+                json={"status": "closed"},
+                headers=headers, timeout=10,
+            )
+        )
+        if r.status_code in (200, 400):
+            await asyncio.to_thread(lambda aid=an["id"]: atualizar_anuncio(aid, ml_id="", status="arquivado"))
+            fechados += 1
+        else:
+            erros += 1
+            print(f"[limpar-inativos] ERRO {an['ml_id']}: {r.status_code} {r.text[:100]}")
+        await asyncio.sleep(1)
+
+    print(f"[limpar-inativos] concluído — fechados={fechados} erros={erros}")
+
+
 @app.post("/api/admin/deletar-forbidden-ml")
 async def deletar_forbidden_ml(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
     """Fecha (sem re-publicar) todos os anúncios under_review/forbidden no ML."""
