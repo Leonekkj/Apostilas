@@ -1,6 +1,8 @@
 """
-start.py — Entry point para Railway.
-Inicia o scheduler como subprocess e executa uvicorn via os.execv.
+start.py — Entry point local e Render/Railway.
+Detecta ambiente automaticamente via DATABASE_URL:
+  - Com DATABASE_URL  → hosted (Render/Railway): instala Playwright, usa PostgreSQL
+  - Sem DATABASE_URL  → local: pula instalações, usa SQLite (apostilas.db)
 """
 import os
 import sys
@@ -10,13 +12,14 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+IS_LOCAL = not os.environ.get("DATABASE_URL", "")
+
 
 def _instalar_playwright():
-    """Instala playwright + Chromium em runtime (não está no requirements.txt)."""
+    """Instala playwright + Chromium em runtime (necessário no Render, filesystem efêmero)."""
     env = os.environ.copy()
     env.pop("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", None)
 
-    # 1. Instala o pacote Python playwright se não estiver disponível
     try:
         import playwright  # noqa: F401
         logger.info("Playwright já instalado")
@@ -27,7 +30,6 @@ def _instalar_playwright():
             check=True, timeout=120,
         )
 
-    # 2. Instala o browser Chromium
     try:
         result = subprocess.run(
             [sys.executable, "-m", "playwright", "install", "chromium"],
@@ -44,8 +46,11 @@ def _instalar_playwright():
 def main():
     port = os.getenv("PORT", "8000")
 
-    # Instala Chromium para geração de PDF (necessário no Render)
-    _instalar_playwright()
+    if IS_LOCAL:
+        logger.info("Modo LOCAL — SQLite (apostilas.db), sem instalação de Playwright")
+    else:
+        logger.info("Modo HOSTED — PostgreSQL, instalando Playwright...")
+        _instalar_playwright()
 
     # Inicia scheduler em background
     logger.info("Iniciando scheduler...")
@@ -56,15 +61,12 @@ def main():
     )
     logger.info("Scheduler iniciado")
 
-    # Execv para uvicorn (substitui o processo atual — Railway monitora este)
     logger.info(f"Iniciando uvicorn na porta {port}...")
-    uvicorn_path = os.path.join(os.path.dirname(sys.executable), "uvicorn")
-    if not os.path.exists(uvicorn_path):
-        uvicorn_path = "uvicorn"  # fallback to PATH
-
     os.execv(
         sys.executable,
-        [sys.executable, "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", port],
+        [sys.executable, "-m", "uvicorn", "api:app",
+         "--host", "0.0.0.0", "--port", port,
+         "--reload" if IS_LOCAL else "--workers", "1"],
     )
 
 
