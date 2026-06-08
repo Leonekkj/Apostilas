@@ -1751,6 +1751,137 @@ async def sincronizar_titulos_ml(background_tasks: BackgroundTasks, _=Depends(_r
     return {"ok": True, "msg": "Sincronização de títulos iniciada em background — verifique os logs"}
 
 
+@app.post("/api/admin/corrigir-titulos-ml")
+async def corrigir_titulos_ml(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """
+    Corrige títulos no ML via pausa → atualiza título → reativa.
+    Necessário porque o ML não permite editar título de anúncios ativos.
+    Só reativa os que estavam ativos antes — pausados permanecem pausados.
+    """
+    background_tasks.add_task(_corrigir_titulos_ml_bg)
+    return {"ok": True, "msg": "Correção de títulos iniciada em background — verifique os logs"}
+
+
+async def _corrigir_titulos_ml_bg():
+    import re
+    import requests as _req
+    from ml import auth as ml_auth, client as ml_client
+    from database import _get_conn, _cursor, PH, _rows_to_dicts
+
+    try:
+        token = await asyncio.to_thread(ml_auth.get_valid_token)
+    except RuntimeError as e:
+        print(f"[corrigir-titulos] Token ML inválido: {e}")
+        return
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    def _buscar_ativos():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(
+                "SELECT id, ml_id, titulo FROM anuncios "
+                "WHERE ml_id IS NOT NULL AND ml_id != '' "
+                "AND status NOT IN ('deletado', 'arquivado')"
+            )
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    anuncios = await asyncio.to_thread(_buscar_ativos)
+    print(f"[corrigir-titulos] {len(anuncios)} anúncios candidatos")
+
+    atualizados = 0
+    pulados = 0
+    erros = 0
+
+    for an in anuncios:
+        ml_id = an["ml_id"]
+        titulo_novo = (an["titulo"] or "")[:60]
+
+        # 1. Busca status atual no ML
+        r = await asyncio.to_thread(
+            lambda mid=ml_id: _req.get(
+                f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
+                params={"attributes": "id,title,status"},
+                headers=headers, timeout=10,
+            )
+        )
+        await asyncio.sleep(0.5)
+
+        if r.status_code != 200:
+            erros += 1
+            print(f"[corrigir-titulos] ERRO ao buscar {ml_id}: {r.status_code}")
+            continue
+
+        item = r.json()
+        titulo_ml = item.get("title", "")
+        status_ml = item.get("status", "")
+
+        # Pula se o título já está correto
+        if "pdf" not in titulo_ml.lower() and "digital" not in titulo_ml.lower():
+            pulados += 1
+            continue
+
+        era_ativo = status_ml == "active"
+
+        # 2. Pausa se estiver ativo
+        if era_ativo:
+            r2 = await asyncio.to_thread(
+                lambda mid=ml_id: _req.put(
+                    f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
+                    json={"status": "paused"},
+                    headers=headers, timeout=10,
+                )
+            )
+            await asyncio.sleep(2)
+            if r2.status_code != 200:
+                erros += 1
+                print(f"[corrigir-titulos] ERRO ao pausar {ml_id}: {r2.status_code} {r2.text[:150]}")
+                continue
+
+        # 3. Atualiza título
+        r3 = await asyncio.to_thread(
+            lambda mid=ml_id, t=titulo_novo: _req.put(
+                f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
+                json={"title": t},
+                headers=headers, timeout=10,
+            )
+        )
+        await asyncio.sleep(1)
+
+        if r3.status_code != 200:
+            erros += 1
+            print(f"[corrigir-titulos] ERRO ao atualizar título {ml_id}: {r3.status_code} {r3.text[:150]}")
+            # Tenta reativar mesmo assim se era ativo
+            if era_ativo:
+                await asyncio.to_thread(
+                    lambda mid=ml_id: _req.put(
+                        f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
+                        json={"status": "active"},
+                        headers=headers, timeout=10,
+                    )
+                )
+                await asyncio.sleep(1)
+            continue
+
+        # 4. Reativa se era ativo
+        if era_ativo:
+            r4 = await asyncio.to_thread(
+                lambda mid=ml_id: _req.put(
+                    f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
+                    json={"status": "active"},
+                    headers=headers, timeout=10,
+                )
+            )
+            await asyncio.sleep(1)
+            if r4.status_code != 200:
+                print(f"[corrigir-titulos] AVISO: título atualizado mas falhou ao reativar {ml_id}: {r4.status_code}")
+
+        atualizados += 1
+        print(f"[corrigir-titulos] OK {ml_id}: '{titulo_ml[:40]}' → '{titulo_novo[:40]}'")
+
+    print(f"[corrigir-titulos] concluído — atualizados={atualizados} pulados={pulados} erros={erros}")
+
+
 async def _sincronizar_titulos_ml_bg():
     import time as _time
     from ml import auth as ml_auth, client as ml_client
