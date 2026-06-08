@@ -2616,21 +2616,27 @@ async def _limpar_inativos_ml_bg():
     fechados = 0
     erros = 0
     for an in para_fechar:
-        # Tenta fechar no ML (ignora se já fechado)
-        r = await asyncio.to_thread(
-            lambda mid=an["ml_id"]: _req.put(
-                f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
-                json={"status": "closed"},
-                headers=headers, timeout=10,
+        for tentativa in range(3):
+            r = await asyncio.to_thread(
+                lambda mid=an["ml_id"]: _req.put(
+                    f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
+                    json={"status": "closed"},
+                    headers=headers, timeout=10,
+                )
             )
-        )
+            if r.status_code == 429:
+                print(f"[limpar-inativos] rate limit — aguardando 10s (tentativa {tentativa+1})")
+                await asyncio.sleep(10)
+                continue
+            break
+
         if r.status_code in (200, 400):
             await asyncio.to_thread(lambda aid=an["id"]: atualizar_anuncio(aid, ml_id="", status="arquivado"))
             fechados += 1
         else:
             erros += 1
             print(f"[limpar-inativos] ERRO {an['ml_id']}: {r.status_code} {r.text[:100]}")
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
 
     print(f"[limpar-inativos] concluído — fechados={fechados} erros={erros}")
 
