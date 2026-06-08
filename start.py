@@ -62,11 +62,11 @@ def main():
     logger.info("Scheduler iniciado")
 
     logger.info(f"Iniciando uvicorn na porta {port}...")
+    extra = ["--reload"] if IS_LOCAL else ["--workers", "1"]
     os.execv(
         sys.executable,
         [sys.executable, "-m", "uvicorn", "api:app",
-         "--host", "0.0.0.0", "--port", port,
-         "--reload" if IS_LOCAL else "--workers", "1"],
+         "--host", "0.0.0.0", "--port", port] + extra,
     )
 
 
