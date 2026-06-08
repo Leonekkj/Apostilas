@@ -19,17 +19,28 @@ ML_API_BASE = "https://api.mercadolibre.com"
 ML_PICTURES_ENDPOINT = f"{ML_API_BASE}/pictures"
 ML_ITEMS_ENDPOINT = f"{ML_API_BASE}/items"
 
-# MLB455868 = Ebooks           — exclusão automática por PI
-# MLB437616 = Livros Físicos   — exige GTIN/ISBN que apostilas autorais não têm
-# MLB445795 = Cursos Completos — ML desativa por "categoria incorreta" (fica em Música/Filmes)
-_CATS_BLOQUEADAS = {"MLB455868", "MLB437616", "MLB445795"}
+# MLB455868 = Ebooks                — exclusão automática por PI
+# MLB437616 = Livros Físicos        — exige GTIN/ISBN que apostilas autorais não têm
+# MLB445795 = Cursos Completos      — ML desativa por "categoria incorreta"
+# MLB1726   = Informática/Softwares — ML classifica como "Softwares educacionais" → flagged
+_CATS_BLOQUEADAS = {"MLB455868", "MLB437616", "MLB445795", "MLB1726"}
 
-# MLB1726 = Educação e Referência (Informática > Softwares) — aceito pelo ML para apostilas físicas, sem GTIN
-# MLB1227 = Outros (Livros, Revistas e Comics) — seguro para digitais sem Ebooks
+# Categorias seguras para apostilas (sem GTIN, sem flag de digital/software)
+# MLB1227 = Outros (Livros, Revistas e Comics) — neutro, aceito para apostilas físicas sem ISBN
+# MLB271599 = Apostilas e Material Didático (Livros) — mais específico, preferido
+_CAT_APOSTILA = os.getenv("ML_CATEGORIA_FISICO_ID", "MLB271599")
 _FALLBACK_DIG = os.getenv("ML_CATEGORIA_DIGITAL_ID", "MLB1227")
-_FALLBACK_FIS = os.getenv("ML_CATEGORIA_FISICO_ID",  "MLB1726")
+_FALLBACK_FIS = _CAT_APOSTILA
 # Legado: ML_CATEGORIA_ID sobrescreve tudo
 _legado = os.getenv("ML_CATEGORIA_ID")
+
+# Whitelist: domain_discovery só é aceito se retornar uma dessas categorias
+_CATS_ACEITAS = {
+    "MLB271599",  # Apostilas e Material Didático
+    "MLB1227",    # Outros (Livros, Revistas e Comics)
+    "MLB48694",   # Livros de Texto e Estudo
+    "MLB1648",    # Livros, Revistas e Comics (pai)
+}
 
 
 def _safe_cat(cat: str, is_digital: bool) -> str:
@@ -42,8 +53,8 @@ def _safe_cat(cat: str, is_digital: bool) -> str:
 
 
 def _predict_categoria(titulo: str, is_digital: bool) -> str:
-    """Consulta ML domain_discovery para obter a categoria ideal para o título.
-    Nunca retorna categorias bloqueadas (Ebooks). Usa fallback se predict falhar."""
+    """Retorna categoria para o título. Domain_discovery só aceita categorias da whitelist.
+    Físico → MLB271599 (Apostilas e Material Didático). Digital → MLB1227 (Outros/Livros)."""
     fallback = _FALLBACK_DIG if is_digital else _FALLBACK_FIS
 
     if _legado:
@@ -59,7 +70,9 @@ def _predict_categoria(titulo: str, is_digital: bool) -> str:
             data = r.json()
             if data:
                 cat = data[0]["category_id"]
-                return _safe_cat(cat, is_digital)
+                # Só aceita se estiver na whitelist — evita categorias de brinquedo, software, etc.
+                if cat in _CATS_ACEITAS and cat not in _CATS_BLOQUEADAS:
+                    return cat
     except Exception as _e:
         print(f"[ML predict_categoria] falha: {_e}")
 
