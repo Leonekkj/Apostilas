@@ -1741,6 +1741,159 @@ async def reverter_para_fisico(_=Depends(_require_auth)):
     return {"ok": True, **resultado}
 
 
+@app.post("/api/admin/sincronizar-titulos-ml")
+async def sincronizar_titulos_ml(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """
+    Atualiza no ML os títulos corrigidos (sem PDF/Digital) para todos os anúncios
+    com ml_id ativo no banco. Roda em background, ~1 req/s.
+    """
+    background_tasks.add_task(_sincronizar_titulos_ml_bg)
+    return {"ok": True, "msg": "Sincronização de títulos iniciada em background — verifique os logs"}
+
+
+async def _sincronizar_titulos_ml_bg():
+    import time as _time
+    from ml import auth as ml_auth, client as ml_client
+    from database import _get_conn, _cursor, PH, _rows_to_dicts
+
+    try:
+        token = await asyncio.to_thread(ml_auth.get_valid_token)
+    except RuntimeError as e:
+        print(f"[sinc-titulos] Token ML inválido: {e}")
+        return
+
+    def _buscar_ativos():
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute(
+                "SELECT id, ml_id, titulo FROM anuncios "
+                "WHERE ml_id IS NOT NULL AND ml_id != '' "
+                "AND status NOT IN ('deletado', 'arquivado')"
+            )
+            return _rows_to_dicts(cur.fetchall(), cur)
+
+    anuncios = await asyncio.to_thread(_buscar_ativos)
+    print(f"[sinc-titulos] {len(anuncios)} anúncios para sincronizar")
+
+    import requests as _req
+    atualizados = 0
+    erros = 0
+    for an in anuncios:
+        ml_id = an["ml_id"]
+        titulo = (an["titulo"] or "")[:60]
+        resp = await asyncio.to_thread(
+            lambda mid=ml_id, t=titulo: _req.put(
+                f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
+                json={"title": t},
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                timeout=10,
+            )
+        )
+        if resp.status_code == 200:
+            atualizados += 1
+        else:
+            erros += 1
+            print(f"[sinc-titulos] ERRO {ml_id}: {resp.status_code} {resp.text[:200]}")
+        await asyncio.sleep(1)
+
+    print(f"[sinc-titulos] concluído — atualizados={atualizados} erros={erros}")
+
+
+@app.post("/api/admin/pausar-cp-ml")
+async def pausar_cp_ml(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
+    """
+    Busca todos os anúncios ativos no ML com 'palavras' no título e os fecha.
+    Necessário porque o reverter-para-fisico zerou os ml_ids localmente.
+    """
+    background_tasks.add_task(_pausar_cp_ml_bg)
+    return {"ok": True, "msg": "Pausar caça-palavras ML iniciado em background — verifique os logs"}
+
+
+async def _pausar_cp_ml_bg():
+    import time as _time
+    import requests as _req
+    from ml import auth as ml_auth, client as ml_client
+
+    try:
+        token = await asyncio.to_thread(ml_auth.get_valid_token)
+    except RuntimeError as e:
+        print(f"[pausar-cp] Token ML inválido: {e}")
+        return
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Busca user_id
+    me = await asyncio.to_thread(lambda: _req.get(f"{ml_client.ML_API_BASE}/users/me", headers=headers, timeout=10))
+    if me.status_code != 200:
+        print(f"[pausar-cp] Erro ao buscar usuário: {me.text}")
+        return
+    user_id = me.json()["id"]
+
+    # Lista todos os item IDs ativos
+    item_ids = []
+    offset = 0
+    while True:
+        r = await asyncio.to_thread(
+            lambda o=offset: _req.get(
+                f"{ml_client.ML_API_BASE}/users/{user_id}/items/search",
+                params={"offset": o, "limit": 50},
+                headers=headers, timeout=10,
+            )
+        )
+        if r.status_code != 200:
+            break
+        results = r.json().get("results", [])
+        item_ids.extend(results)
+        if len(results) < 50:
+            break
+        offset += 50
+
+    print(f"[pausar-cp] {len(item_ids)} itens ativos no ML")
+
+    # Busca detalhes em lote de 20 e filtra caça-palavras
+    cp_ids = []
+    for i in range(0, len(item_ids), 20):
+        batch = item_ids[i:i+20]
+        r = await asyncio.to_thread(
+            lambda b=batch: _req.get(
+                f"{ml_client.ML_API_BASE}/items",
+                params={"ids": ",".join(b)},
+                headers=headers, timeout=10,
+            )
+        )
+        if r.status_code != 200:
+            continue
+        for entry in r.json():
+            item = entry.get("body", {})
+            titulo = item.get("title", "")
+            if "palavras" in titulo.lower():
+                cp_ids.append(item.get("id", ""))
+
+    print(f"[pausar-cp] {len(cp_ids)} caça-palavras encontrados no ML")
+
+    fechados = 0
+    erros = 0
+    for ml_id in cp_ids:
+        if not ml_id:
+            continue
+        resp = await asyncio.to_thread(
+            lambda mid=ml_id: _req.put(
+                f"{ml_client.ML_ITEMS_ENDPOINT}/{mid}",
+                json={"status": "closed"},
+                headers={**headers, "Content-Type": "application/json"},
+                timeout=10,
+            )
+        )
+        if resp.status_code == 200:
+            fechados += 1
+        else:
+            erros += 1
+            print(f"[pausar-cp] ERRO {ml_id}: {resp.status_code} {resp.text[:200]}")
+        await asyncio.sleep(1)
+
+    print(f"[pausar-cp] concluído — fechados={fechados} erros={erros}")
+
+
 @app.post("/api/admin/fix-waiting-for-patch")
 async def fix_waiting_for_patch(background_tasks: BackgroundTasks, _=Depends(_require_auth)):
     """
