@@ -253,6 +253,7 @@ def criar_tabelas() -> None:
             ("descricao",     "TEXT DEFAULT ''"),
             ("shopee_item_id","TEXT"),
             ("shopee_status", "TEXT DEFAULT 'nao_publicado'"),
+            ("categoria_id",  "TEXT"),
         ])
 
         # Tabela: apostilas
@@ -270,6 +271,12 @@ def criar_tabelas() -> None:
         _add_columns(cur, conn, "produtos", [
             ("tema",        "TEXT"),
             ("dificuldade", "TEXT"),
+        ])
+
+        # Tabela: topicos — suporte a múltiplos nichos
+        _add_columns(cur, conn, "topicos", [
+            ("publico_alvo", "TEXT DEFAULT 'idosos 60+'"),
+            ("colecao",      "TEXT DEFAULT 'Bem Envelhecer'"),
         ])
 
         # Multi-marca v2 schema
@@ -293,6 +300,13 @@ def criar_tabelas() -> None:
         "Caça-Palavras",
         "caca-palavras",
         "caca palavras idosos passatempo letras busca",
+    )
+    _upsert_topico(
+        "TDAH Infantil",
+        "tdah-infantil",
+        "TDAH atividades criança atenção concentração foco infantil tdah exercícios",
+        publico_alvo="crianças com TDAH (5-12 anos)",
+        colecao="Foco e Aprender",
     )
 
 
@@ -359,20 +373,20 @@ def _seed_with_conn(conn) -> None:
     conn.commit()
 
 
-def _upsert_topico(nome: str, slug: str, keywords: str) -> None:
+def _upsert_topico(nome: str, slug: str, keywords: str, publico_alvo: str = "idosos 60+", colecao: str = "Bem Envelhecer") -> None:
     """Insere tópico se o slug ainda não existe (idempotente)."""
     with _get_conn() as conn:
         cur = _cursor(conn)
         if USE_POSTGRES:
             cur.execute(
-                f"INSERT INTO topicos (nome, slug, keywords) VALUES ({PH}, {PH}, {PH}) "
-                f"ON CONFLICT (slug) DO NOTHING",
-                (nome, slug, keywords),
+                f"INSERT INTO topicos (nome, slug, keywords, publico_alvo, colecao) VALUES ({PH}, {PH}, {PH}, {PH}, {PH}) "
+                f"ON CONFLICT (slug) DO UPDATE SET publico_alvo = EXCLUDED.publico_alvo, colecao = EXCLUDED.colecao",
+                (nome, slug, keywords, publico_alvo, colecao),
             )
         else:
             cur.execute(
-                f"INSERT OR IGNORE INTO topicos (nome, slug, keywords) VALUES ({PH}, {PH}, {PH})",
-                (nome, slug, keywords),
+                f"INSERT OR IGNORE INTO topicos (nome, slug, keywords, publico_alvo, colecao) VALUES ({PH}, {PH}, {PH}, {PH}, {PH})",
+                (nome, slug, keywords, publico_alvo, colecao),
             )
         conn.commit()
 
@@ -466,6 +480,21 @@ def criar_anuncio(
     if apostila_id is not None and kit_id is not None:
         raise ValueError("criar_anuncio: apostila_id e kit_id são mutuamente exclusivos")
 
+    # Validação central (título <=60, duplicata → Vol. N, preço na faixa).
+    # Import lazy: validacao importa database dentro das funções (sem ciclo no import-time).
+    import validacao
+    correcoes, corrigidos, bloqueios = validacao.validar_anuncio(
+        {"titulo": titulo, "preco": preco, "tipo": tipo, "kit_id": kit_id,
+         "apostila_id": apostila_id},
+        contexto="criacao",
+    )
+    if bloqueios:
+        raise ValueError(f"criar_anuncio: anúncio inválido — {'; '.join(bloqueios)}")
+    titulo = correcoes.get("titulo", titulo)
+    preco = correcoes.get("preco", preco)
+    for msg in corrigidos:
+        print(f"[validacao] criar_anuncio: {msg}")
+
     with _get_conn() as conn:
         cur = _cursor(conn)
         sql = _insert_returning(
@@ -477,6 +506,38 @@ def criar_anuncio(
         row_id = _lastrowid(cur, conn)
         conn.commit()
         return row_id
+
+
+def existe_titulo(titulo: str, excluir_id=None, incluir_rascunhos: bool = True) -> bool:
+    """True se outro anúncio já usa este título.
+
+    incluir_rascunhos=True  → considera qualquer anúncio vivo, não-deletado (uso na criação).
+    incluir_rascunhos=False → só publicados com ml_id (comportamento da publicação).
+    """
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        # Comparação case/espaço-insensitive: títulos ML duplicados "Em Caixa
+        # Diferente" ou com espaço sobrando contam como o mesmo título
+        if incluir_rascunhos:
+            sql = (
+                f"SELECT COUNT(*) as cnt FROM anuncios "
+                f"WHERE LOWER(TRIM(titulo)) = LOWER(TRIM({PH})) "
+                f"AND (status IS NULL OR status != 'deletado')"
+            )
+        else:
+            sql = (
+                f"SELECT COUNT(*) as cnt FROM anuncios "
+                f"WHERE LOWER(TRIM(titulo)) = LOWER(TRIM({PH})) "
+                f"AND ml_id IS NOT NULL AND status = 'publicado'"
+            )
+        params = [titulo]
+        if excluir_id is not None:
+            sql += f" AND id != {PH}"
+            params.append(excluir_id)
+        cur.execute(sql, params)
+        row = cur.fetchone()
+        cnt = row["cnt"] if isinstance(row, dict) else row[0]
+        return cnt > 0
 
 
 def importar_anuncio_externo(ml_id: str, titulo: str, preco: float, status: str = "publicado", thumbnail: str = "") -> int:
@@ -617,7 +678,7 @@ def atualizar_anuncio(anuncio_id: int, **kwargs) -> None:
         "status", "ml_id", "imagem_path", "erro_msg",
         "publicado_em", "titulo", "preco", "template_id",
         "variacao", "angulo", "kit_id", "apostila_id",
-        "shopee_item_id", "shopee_status",
+        "shopee_item_id", "shopee_status", "categoria_id",
     }
     campos = {k: v for k, v in kwargs.items() if k in campos_permitidos}
     if not campos:
@@ -686,10 +747,12 @@ def listar_apostilas_por_topico_e_num_ex() -> dict:
     with _get_conn() as conn:
         cur = _cursor(conn)
         cur.execute("""
-            SELECT topico_id, num_exercicios, MAX(id) AS apostila_id
-            FROM apostilas
-            WHERE produto_id IS NOT NULL
-            GROUP BY topico_id, num_exercicios
+            SELECT a.topico_id, a.num_exercicios, MAX(a.id) AS apostila_id
+            FROM apostilas a
+            JOIN topicos t ON a.topico_id = t.id
+            WHERE a.produto_id IS NOT NULL
+              AND t.ativo = TRUE
+            GROUP BY a.topico_id, a.num_exercicios
         """)
         result: dict = {}
         for row in cur.fetchall():
@@ -985,12 +1048,15 @@ def deletar_anuncios_por_kit(kit_id: int) -> list:
         return ml_ids
 
 
-def fix_precos_kits_db(desconto: float = 0.85) -> list[dict]:
+def fix_precos_kits_db(desconto: float = None) -> list[dict]:
     """Recalcula e atualiza o preço de todos os anúncios de kit não publicados.
 
     Para cada kit, soma o preço do anúncio físico mais barato de cada apostila
-    (ou usa 79.90 como fallback) e aplica o desconto. Retorna lista de alterações.
+    (ou usa o fallback de pricing.py) e aplica o desconto. Retorna lista de alterações.
     """
+    import pricing
+    if desconto is None:
+        desconto = pricing.DESCONTO_KIT
     with _get_conn() as conn:
         cur = _cursor(conn)
 
@@ -1026,7 +1092,8 @@ def fix_precos_kits_db(desconto: float = 0.85) -> list[dict]:
                         ORDER BY preco DESC LIMIT 1
                     """, (aid,))
                     r = cur.fetchone()
-                    total += float(r[0]) if r and r[0] else 79.99
+                    # r["preco"] funciona em SQLite (Row) e PG (RealDictRow); r[0] quebra no PG
+                    total += float(r["preco"]) if r and r["preco"] else pricing.PRECO_FALLBACK_INDIVIDUAL
 
                 kits_preco[kit_id] = round(total * desconto, 2)
 
@@ -1080,10 +1147,16 @@ def salvar_venda(
     quantidade: int,
     data_venda: str,
     comprador_id: str = "",
-) -> None:
-    """Upsert de uma venda pelo ml_order_id (não cria duplicatas)."""
+) -> bool:
+    """Upsert de uma venda pelo ml_order_id (não cria duplicatas).
+
+    Retorna True se a venda é NOVA (primeira vez registrada) — usado para
+    disparar a mensagem de boas-vindas uma única vez.
+    """
     with _get_conn() as conn:
         cur = _cursor(conn)
+        cur.execute(f"SELECT 1 FROM vendas WHERE ml_order_id = {PH}", (ml_order_id,))
+        nova = cur.fetchone() is None
         if USE_POSTGRES:
             cur.execute(
                 """INSERT INTO vendas
@@ -1115,6 +1188,7 @@ def salvar_venda(
                 (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda, comprador_id),
             )
         conn.commit()
+        return nova
 
 
 def marcar_pdf_entregue(ml_order_id: str) -> None:
@@ -1217,19 +1291,71 @@ def resumo_vendas_por_apostila() -> list[dict]:
 
 
 def buscar_apostilas_vendidas_sem_pdf() -> list[dict]:
-    """Retorna apostilas que tiveram vendas mas ainda não têm PDF gerado."""
+    """Retorna apostilas que tiveram vendas mas ainda não têm PDF gerado.
+
+    Cobre vendas de anúncio individual (apostila_id) E de kit (kit_id →
+    kits.apostila_ids). Paths do Render antigo ('/opt/render...') contam
+    como ausentes — o arquivo não existe mais nesta máquina.
+    """
+    # pdf_path inválido = NULL, vazio ou apontando para o filesystem do Render.
+    # O padrão LIKE vai como parâmetro — '%' literal no SQL quebra no psycopg2.
+    sem_pdf = f"(ap.pdf_path IS NULL OR ap.pdf_path = '' OR ap.pdf_path LIKE {PH})"
+    RENDER_PAT = "/opt/render%"
+
     with _get_conn() as conn:
         cur = _cursor(conn)
-        cur.execute("""
+
+        # 1. Vendas de anúncios individuais (venda_ml_id = anúncio vendido,
+        # usado para buscar a foto do anúncio e usar como capa do PDF)
+        cur.execute(f"""
             SELECT DISTINCT ap.id, ap.topico_id, ap.num_exercicios, ap.conteudo_json,
-                            tp.nome AS topico_nome
+                            tp.nome AS topico_nome, an.ml_id AS venda_ml_id,
+                            an.variacao AS venda_variacao,
+                            p.nome AS produto_nome, p.tema, p.dificuldade
             FROM vendas v
             JOIN anuncios  an ON v.anuncio_id  = an.id
             JOIN apostilas ap ON an.apostila_id = ap.id
             JOIN topicos   tp ON ap.topico_id   = tp.id
-            WHERE (ap.pdf_path IS NULL OR ap.pdf_path = '')
+            LEFT JOIN produtos p ON ap.produto_id = p.id
+            WHERE {sem_pdf}
+        """, (RENDER_PAT,))
+        resultado = {r["id"]: r for r in _rows_to_dicts(cur.fetchall(), cur)}
+
+        # 2. Vendas de kits: expande kits.apostila_ids (JSON) em Python
+        cur.execute("""
+            SELECT DISTINCT k.apostila_ids, an.ml_id, an.variacao
+            FROM vendas v
+            JOIN anuncios an ON v.anuncio_id = an.id
+            JOIN kits k ON an.kit_id = k.id
         """)
-        return _rows_to_dicts(cur.fetchall(), cur)
+        ml_por_apostila: dict = {}
+        for row in _rows_to_dicts(cur.fetchall(), cur):
+            try:
+                for aid in json.loads(row.get("apostila_ids") or "[]"):
+                    ml_por_apostila.setdefault(aid, (row.get("ml_id"), row.get("variacao")))
+            except Exception:
+                continue
+        ids_kits = set(ml_por_apostila) - set(resultado.keys())
+
+        for aid in ids_kits:
+            cur.execute(f"""
+                SELECT ap.id, ap.topico_id, ap.num_exercicios, ap.conteudo_json,
+                       tp.nome AS topico_nome,
+                       p.nome AS produto_nome, p.tema, p.dificuldade
+                FROM apostilas ap
+                JOIN topicos tp ON ap.topico_id = tp.id
+                LEFT JOIN produtos p ON ap.produto_id = p.id
+                WHERE ap.id = {PH} AND {sem_pdf}
+            """, (aid, RENDER_PAT))
+            row = cur.fetchone()
+            if row is not None:
+                d = _row_to_dict(row, cur)
+                ml_id, variacao = ml_por_apostila.get(aid, (None, None))
+                d["venda_ml_id"] = ml_id
+                d["venda_variacao"] = variacao
+                resultado[d["id"]] = d
+
+        return list(resultado.values())
 
 
 def listar_todas_apostilas() -> list[dict]:

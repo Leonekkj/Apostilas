@@ -18,8 +18,12 @@ import re
 from groq import Groq
 from anthropic import Anthropic
 
-FATIAS = [30, 60, 90, 120, 150, 200]
-PRECOS_FATIA = {30: 14.90, 60: 19.90, 90: 24.90, 120: 29.90, 150: 34.90, 200: 44.90}
+# Preços e fatias agora vivem em pricing.py (fonte única).
+
+# Importa validacao do diretório pai (mesmo padrão de ml/auth.py)
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from validacao import dedupe_titulos, fit_titulo
 
 # ---------------------------------------------------------------------------
 # Cliente (lazy-initialized so the module can be imported without a key)
@@ -95,34 +99,36 @@ def _chat_completions(msgs: list, max_tokens: int, json_mode: bool = True) -> st
         "Configure DASHSCOPE_API_KEY ou aguarde o reset do Groq (meia-noite UTC)."
     )
 
-_SYSTEM_EDITORIAL = """\
-Você é especialista em design editorial premium de materiais terapêuticos para idosos 60+.
-Trabalha para a Cognivita (cognivita.com.br), marca premium de estimulação cognitiva.
-Cria textos sofisticados, acolhedores e humanos — nunca robóticos, nunca infantilizantes.
-Responda SEMPRE com JSON válido, sem texto extra antes ou depois do JSON.\
-"""
+def _system_editorial(publico_alvo: str) -> str:
+    return (
+        f"Você é especialista em design editorial premium de materiais terapêuticos para {publico_alvo}.\n"
+        "Trabalha para a Cognivita (cognivita.com.br), marca premium de estimulação cognitiva.\n"
+        "Cria textos sofisticados, acolhedores e humanos — nunca robóticos.\n"
+        "Responda SEMPRE com JSON válido, sem texto extra antes ou depois do JSON."
+    )
 
 _SYSTEM_GABARITO = """\
-Você é revisor de exercícios cognitivos impressos para idosos 60+.
+Você é revisor de exercícios cognitivos impressos.
 Analisa exercícios e retorna respostas corretas de forma clara e objetiva.
 Responda SEMPRE com JSON válido, sem texto extra antes ou depois.\
 """
 
-_SYSTEM_CONTEUDO = """\
-Você é especialista em estimulação cognitiva para idosos. \
-Cria exercícios físicos impressos (apostilas) para pessoas acima de 60 anos, \
-seus cuidadores e terapeutas ocupacionais. \
-O conteúdo deve ser simples, claro, acolhedor e adequado para impressão. \
-Responda SEMPRE com JSON válido, sem texto extra antes ou depois do JSON. \
-Nunca use markdown (sem ``` ou blocos de código).\
-"""
+def _system_conteudo(publico_alvo: str) -> str:
+    return (
+        f"Você é especialista em estimulação cognitiva para {publico_alvo}. "
+        f"Cria exercícios físicos impressos (apostilas) para {publico_alvo}, "
+        "seus cuidadores, terapeutas e educadores. "
+        "O conteúdo deve ser simples, claro, acolhedor e adequado para impressão. "
+        "Responda SEMPRE com JSON válido, sem texto extra antes ou depois do JSON. "
+        "Nunca use markdown (sem ``` ou blocos de código)."
+    )
 
-_SYSTEM_TITULOS = """\
-Você é especialista em copywriting para o Mercado Livre (ML). \
-Cria títulos e descrições de produtos físicos impressos voltados para \
-estimulação cognitiva de idosos 60+. \
-Responda SEMPRE com JSON válido, sem texto extra antes ou depois do JSON.\
-"""
+def _system_titulos(publico_alvo: str) -> str:
+    return (
+        "Você é especialista em copywriting para o Mercado Livre (ML). "
+        f"Cria títulos e descrições de produtos físicos impressos voltados para {publico_alvo}. "
+        "Responda SEMPRE com JSON válido, sem texto extra antes ou depois do JSON."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +271,8 @@ def gerar_mapa_editorial(topico: dict, num_exercicios: int) -> dict:
     n_fases = _num_fases(num_exercicios)
     nome_topico = topico.get("nome", topico.get("name", str(topico)))
     descricao_topico = topico.get("descricao", topico.get("description", ""))
+    publico_alvo = topico.get("publico_alvo", "idosos 60+")
+    colecao = topico.get("colecao", "Bem Envelhecer")
     por_fase = num_exercicios // n_fases
     sobra = num_exercicios % n_fases
     distribuicao = ", ".join(
@@ -276,21 +284,22 @@ Crie o mapa editorial para uma apostila Cognivita premium.
 
 Tópico: {nome_topico}
 Descrição: {descricao_topico}
+Público-alvo: {publico_alvo}
 Total de exercícios: {num_exercicios}
 Número de fases: {n_fases}
 Exercícios por fase (em ordem): {distribuicao}
-Coleção: Bem Envelhecer
+Coleção: {colecao}
 
 Retorne SOMENTE este JSON, sem texto antes ou depois:
 
 {{
-  "apresentacao": "Texto de boas-vindas em 2-3 parágrafos (300-500 palavras). Tom: sofisticado, acolhedor, humano. Fala sobre o tópico {nome_topico}, benefícios cognitivos, como usar. NUNCA infantilize o leitor idoso.",
+  "apresentacao": "Texto de boas-vindas em 2-3 parágrafos (300-500 palavras). Tom: sofisticado, acolhedor, humano. Fala sobre o tópico {nome_topico}, benefícios para {publico_alvo}, como usar.",
   "fases": [
     {{
       "numero": 1,
       "nome": "Nome evocativo e elegante da fase",
       "objetivo": "Objetivo cognitivo específico desta fase, em 1 frase direta",
-      "abertura": "Texto de abertura da fase (150-200 palavras). Motivador, acolhedor, conectado ao tópico {nome_topico}.",
+      "abertura": "Texto de abertura da fase (150-200 palavras). Motivador, acolhedor, conectado ao tópico {nome_topico} e ao público {publico_alvo}.",
       "secao": "UMA DE: MEMÓRIA / ATENÇÃO / RACIOCÍNIO / LINGUAGEM / PERCEPÇÃO",
       "num_exercicios": {por_fase},
       "exercicios_numeros": []
@@ -324,7 +333,7 @@ Regras:
             messages=[
                 {"role": "user", "content": prompt},
             ],
-            system=_SYSTEM_EDITORIAL,
+            system=_system_editorial(publico_alvo),
         )
         raw = response.content[0].text
         return _parse_json(raw)
@@ -455,21 +464,24 @@ def _gerar_tipo_unico(topico: dict, tipo: str, n: int, fase: dict = None) -> lis
             f"\nFase: {fase.get('nome', '')} — {fase.get('objetivo', '')}\n"
         )
 
+    publico_alvo = topico.get("publico_alvo", "idosos 60+")
+
     prompt = f"""\
 Gere exatamente {n} exercício(s) de estimulação cognitiva.
 Tópico: {nome_topico} — {descricao_topico}{contexto_fase}
+Público-alvo: {publico_alvo}
 
 {formato}
 
 Crie exercícios criativos e variados relacionados ao tópico "{nome_topico}".
-Todos os exercícios devem ser adequados para idosos 60+, realizáveis em papel impresso.
+Todos os exercícios devem ser adequados para {publico_alvo}, realizáveis em papel impresso.
 
 Retorne SOMENTE este JSON com exatamente {n} exercício(s) no array:
 {{"exercicios": [...]}}\
 """
 
     msgs = [
-        {"role": "system", "content": _SYSTEM_CONTEUDO},
+        {"role": "system", "content": _system_conteudo(topico.get("publico_alvo", "idosos 60+"))},
         {"role": "user", "content": prompt},
     ]
     raw = _chat_completions(msgs, max_tokens=4000)
@@ -491,8 +503,10 @@ def _gerar_batch(topico: dict, n: int, offset: int = 0, fase: dict = None) -> li
     if fase:
         contexto_fase = f"\nFase: {fase.get('nome', '')} — {fase.get('objetivo', '')}\n"
 
+    publico_alvo = topico.get("publico_alvo", "idosos 60+")
+
     prompt = f"""\
-Gere exatamente {n} exercícios cognitivos para idosos 60+ sobre "{nome_topico}".{contexto_fase}
+Gere exatamente {n} exercícios cognitivos para {publico_alvo} sobre "{nome_topico}".{contexto_fase}
 Numere de {inicio} a {inicio + n - 1}. Exercícios devem ser realizáveis em papel impresso.
 
 TIPOS OBRIGATÓRIOS por exercício (siga esta ordem exata):
@@ -518,7 +532,7 @@ Retorne SOMENTE: {{"exercicios": [todos os {n} exercícios]}}\
 """
 
     msgs = [
-        {"role": "system", "content": _SYSTEM_CONTEUDO},
+        {"role": "system", "content": _system_conteudo(publico_alvo)},
         {"role": "user", "content": prompt},
     ]
     raw = _chat_completions(msgs, max_tokens=8000)
@@ -574,7 +588,7 @@ def gerar_conteudo(topico: dict, num_exercicios: int) -> str:
     result = {
         "topico": nome_topico,
         "num_exercicios": len(todos_exercicios),
-        "colecao": "Bem Envelhecer",
+        "colecao": topico.get("colecao", "Bem Envelhecer"),
         "apresentacao": mapa.get("apresentacao", ""),
         "fases": mapa["fases"],
         "rotina_semanal": mapa.get("rotina_semanal", {}),
@@ -588,14 +602,32 @@ def gerar_conteudo(topico: dict, num_exercicios: int) -> str:
 # 2. gerar_titulos_ml
 # ---------------------------------------------------------------------------
 
-_ANGULOS = [
-    ("beneficio",   "Foco no benefício cognitivo (memória, atenção, raciocínio, etc.)"),
-    ("publico",     "Foco no público-alvo (idosos 60+, terceira idade, melhor idade)"),
+_ANGULOS_BASE = [
+    ("beneficio",   "Foco no benefício cognitivo (atenção, foco, raciocínio, memória, etc.)"),
+    ("publico",     "Foco no público-alvo e suas necessidades específicas"),
     ("quantidade",  "Foco na quantidade de exercícios ou atividades do produto"),
-    ("aplicacao",   "Foco no uso profissional (terapeuta ocupacional, fisioterapeuta, cuidador)"),
-    ("resultado",   "Foco no resultado esperado (melhore a memória, estimule o cérebro)"),
+    ("aplicacao",   "Foco no uso por profissional ou familiar (terapeuta, cuidador, pai/mãe)"),
+    ("resultado",   "Foco no resultado esperado (melhore o foco, estimule o cérebro)"),
     ("formato",     "Foco no formato físico do produto (impresso, encadernado, espiral, A4)"),
 ]
+
+# Palavras-chave por público para incluir nos títulos ML
+_TITULO_KEYWORDS = {
+    "idosos 60+":                   ("Para Idosos", "Idosos 60 Anos", "Terceira Idade", "Idoso"),
+    "crianças com tdah":            ("TDAH", "Para Crianças TDAH", "Foco Infantil", "TDAH Criança"),
+    "crianças com autismo":         ("Autismo", "TEA", "Para Autista", "Autismo Infantil"),
+    "crianças com dislexia":        ("Dislexia", "Para Dislexia", "Leitura Infantil", "Dislexia Criança"),
+    "adultos em reabilitação":      ("Reabilitação", "Pós-AVC", "Reabilitação Cognitiva", "AVC"),
+    "cuidadores de idosos":         ("Cuidador", "Para Cuidadores", "Idosos Cuidadores", "Terceira Idade"),
+}
+
+def _get_titulo_keywords(publico_alvo: str) -> tuple:
+    """Retorna keywords de título adequadas ao público."""
+    pa = publico_alvo.lower()
+    for key, kws in _TITULO_KEYWORDS.items():
+        if key in pa:
+            return kws
+    return ("Apostila", "Atividades", "Exercícios", "Cognitivo")
 
 
 def gerar_titulos_ml(topico: dict, num_exercicios: int) -> list[dict]:
@@ -603,39 +635,31 @@ def gerar_titulos_ml(topico: dict, num_exercicios: int) -> list[dict]:
     Gera 6 variações de títulos para anúncio no Mercado Livre.
 
     Args:
-        topico: dict com {"nome": str, ...}
+        topico: dict com {"nome": str, "publico_alvo": str, ...}
         num_exercicios: quantidade de exercícios da apostila
 
     Returns:
         Lista de 6 dicts: [{"variacao": int, "angulo": str, "titulo": str, "descricao": str}]
     """
     nome_topico = topico.get("nome", topico.get("name", str(topico)))
-
-    angulos_texto = "\n".join(
-        f'  {i+1}. angulo="{ang}" — {desc}'
-        for i, (ang, desc) in enumerate(_ANGULOS)
-    )
+    publico_alvo = topico.get("publico_alvo", "idosos 60+")
+    kws = _get_titulo_keywords(publico_alvo)
+    kw_exemplo = kws[0]
 
     prompt = f"""\
 Crie 6 títulos otimizados para busca no Mercado Livre de uma apostila física impressa.
 
 Produto: Apostila de {nome_topico} com {num_exercicios} exercícios
-Público: idosos 60+, cuidadores, terapeutas ocupacionais
+Público: {publico_alvo}
 
 Regras obrigatórias:
 - Máximo 60 caracteres por título (conte incluindo espaços)
 - Title Case (primeira letra de cada palavra em maiúscula, exceto preposições curtas)
 - Denso em palavras-chave que compradores digitam no ML
-- Incluir "Para Idosos" em pelo menos 4 dos 6 títulos
-- Variar os termos complementares entre os 6 (Apostila, Exercícios, Atividades, Cognitivo, Memória, Estimulação, Fonte Grande, A4, Impresso, Físico)
+- Incluir "{kw_exemplo}" em pelo menos 4 dos 6 títulos
+- Variar os termos complementares: {', '.join(kws)} + (Apostila, Exercícios, Atividades, A4, Impresso, Físico)
 - Sem linguagem promocional (sem: Incrível, Melhor, Oferta, !, ?)
 - Nenhum título pode ser idêntico a outro
-
-Exemplos do formato desejado para um produto de Memória:
-"Exercícios De Memória Para Idosos Apostila Física"
-"Atividades Cognitivas Para Idosos Envelhecimento Saudável"
-"Apostila Para Idosos Com Fonte Grande E Fácil Leitura"
-"Estimulação Cognitiva Idosos 60 Exercícios Impressos"
 
 Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 
@@ -650,17 +674,25 @@ Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 """
 
     raw = _chat_completions([
-        {"role": "system", "content": _SYSTEM_TITULOS},
+        {"role": "system", "content": _system_titulos(publico_alvo)},
         {"role": "user", "content": prompt},
     ], max_tokens=1024)
     result = _parse_json(raw)
+
+    # LLM às vezes envolve a lista num dict {"titulos": [...]} — desempacota
+    if isinstance(result, dict):
+        for v in result.values():
+            if isinstance(v, list) and len(v) == 6:
+                result = v
+                break
 
     if not isinstance(result, list) or len(result) != 6:
         raise ValueError(
             f"Esperava lista de 6 itens, recebi: {type(result).__name__} "
             f"com {len(result) if isinstance(result, list) else '?'} itens"
         )
-    return result
+    # Pós-LLM: garante <=60 chars (corte em palavra) e títulos únicos entre si
+    return dedupe_titulos(result)
 
 
 # ---------------------------------------------------------------------------
@@ -670,17 +702,18 @@ Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 def gerar_descricao_ml(topico: dict, num_exercicios: int) -> str:
     """Gera descrição profissional para anúncio no ML no formato CogniVita."""
     nome_topico = topico.get("nome", topico.get("name", str(topico)))
+    publico_alvo = topico.get("publico_alvo", "idosos 60+")
 
     prompt = f"""\
-Crie uma descrição de produto para o Mercado Livre de uma apostila física impressa de estimulação cognitiva.
+Crie uma descrição de produto para o Mercado Livre de uma apostila física impressa.
 
 Produto: Apostila de {nome_topico} com {num_exercicios} exercícios
-Público: idosos 60+, cuidadores, terapeutas ocupacionais
+Público: {publico_alvo}
 Marca: CogniVita
 
 Use EXATAMENTE este formato (mantenha os títulos em maiúscula, use • para bullets):
 
-APOSTILA FÍSICA — ESTIMULAÇÃO COGNITIVA PARA IDOSOS
+APOSTILA FÍSICA — {nome_topico.upper()} PARA {publico_alvo.upper()}
 [1 parágrafo de 2 frases descrevendo o produto e o tópico {nome_topico}]
 
 Indicado para:
@@ -696,7 +729,7 @@ O QUE VOCÊ RECEBE
 • [outro item específico do produto]
 
 BENEFÍCIOS
-• [benefício 1 relacionado a {nome_topico}]
+• [benefício 1 relacionado a {nome_topico} para {publico_alvo}]
 • [benefício 2]
 • [benefício 3]
 • [benefício 4]
@@ -712,13 +745,12 @@ ESPECIFICAÇÕES
 • Quantidade: {num_exercicios} atividades
 • Tamanho: A4
 • Impressão: Preto e Branco
-• Fonte: Ampliada (ideal para idosos)
 
 Retorne APENAS o texto acima preenchido, sem JSON, sem markdown, sem comentários.\
 """
 
     return _chat_completions([
-        {"role": "system", "content": _SYSTEM_TITULOS},
+        {"role": "system", "content": _system_titulos(publico_alvo)},
         {"role": "user", "content": prompt},
     ], max_tokens=600, json_mode=False).strip()
 
@@ -726,12 +758,13 @@ Retorne APENAS o texto acima preenchido, sem JSON, sem markdown, sem comentário
 def gerar_descricao_digital_ml(topico: dict, num_exercicios: int) -> str:
     """Gera descrição para anúncio digital (PDF) no ML."""
     nome_topico = topico.get("nome", topico.get("name", str(topico)))
+    publico_alvo_dig = topico.get("publico_alvo", "idosos 60+")
 
     prompt = f"""\
-Crie uma descrição de produto para o Mercado Livre de uma apostila digital em PDF de estimulação cognitiva.
+Crie uma descrição de produto para o Mercado Livre de uma apostila digital em PDF.
 
 Produto: PDF de {nome_topico} com {num_exercicios} exercícios
-Público: idosos 60+, cuidadores, terapeutas ocupacionais
+Público: {publico_alvo_dig}
 Marca: CogniVita
 Entrega: arquivo PDF enviado após confirmação do pagamento
 
@@ -775,7 +808,7 @@ Retorne APENAS o texto acima preenchido, sem JSON, sem markdown, sem comentário
 """
 
     return _chat_completions([
-        {"role": "system", "content": _SYSTEM_TITULOS},
+        {"role": "system", "content": _system_titulos(topico.get("publico_alvo", "idosos 60+"))},
         {"role": "user", "content": prompt},
     ], max_tokens=600, json_mode=False).strip()
 
@@ -788,6 +821,7 @@ def gerar_titulos_kit_ml(
     kit_nome: str,
     apostilas: list[dict],
     num_exercicios_total: int,
+    publico_alvo: str = "idosos 60+",
 ) -> list[dict]:
     """
     Gera 6 variações de títulos para um kit de apostilas no Mercado Livre.
@@ -796,16 +830,18 @@ def gerar_titulos_kit_ml(
         kit_nome: nome do kit (ex: "Kit Memória + Atenção")
         apostilas: lista de dicts com {"nome": str} de cada apostila do kit
         num_exercicios_total: soma dos exercícios de todas as apostilas
+        publico_alvo: público-alvo do kit (default "idosos 60+")
 
     Returns:
         Lista de 6 dicts: [{"variacao": int, "angulo": str, "titulo": str, "descricao": str}]
     """
     nomes = ", ".join(a.get("topico_nome", a.get("nome", a.get("name", str(a)))) for a in apostilas)
     qtd_apostilas = len(apostilas)
+    kw_kit = _get_titulo_keywords(publico_alvo)[0]
 
     angulos_kit = [
         ("combo",      "Foco no conjunto de apostilas (kit, combo, coleção)"),
-        ("publico",    "Foco no público-alvo (idosos 60+, terceira idade, melhor idade)"),
+        ("publico",    f"Foco no público-alvo ({publico_alvo})"),
         ("quantidade", f"Foco na quantidade ({num_exercicios_total} exercícios, {qtd_apostilas} apostilas)"),
         ("aplicacao",  "Foco no uso profissional (terapeuta ocupacional, cuidador, clínica)"),
         ("resultado",  "Foco no resultado (estimulação completa, saúde cognitiva)"),
@@ -824,13 +860,13 @@ Kit: {kit_nome}
 Apostilas incluídas: {nomes}
 Total de exercícios: {num_exercicios_total}
 Número de apostilas: {qtd_apostilas}
-Público: idosos 60+, cuidadores, terapeutas ocupacionais
+Público: {publico_alvo}
 
 Regras obrigatórias:
 - Máximo 60 caracteres por título
 - Title Case
 - Denso em palavras-chave de busca
-- Incluir "Para Idosos" em pelo menos 4 dos 6 títulos
+- Incluir "{kw_kit}" em pelo menos 4 dos 6 títulos
 - Variar: Kit, Combo, Coleção, Apostilas, Exercícios, Cognitivo, Físico, Impresso, Estimulação
 - Sem linguagem promocional (sem: Incrível, Melhor, Oferta, !, ?)
 - Nenhum título idêntico a outro
@@ -852,17 +888,25 @@ Retorne SOMENTE este JSON, sem nenhum texto antes ou depois:
 """
 
     raw = _chat_completions([
-        {"role": "system", "content": _SYSTEM_TITULOS},
+        {"role": "system", "content": _system_titulos(publico_alvo)},
         {"role": "user", "content": prompt},
     ], max_tokens=1024)
     result = _parse_json(raw)
+
+    # LLM às vezes envolve a lista num dict {"titulos": [...]} — desempacota
+    if isinstance(result, dict):
+        for v in result.values():
+            if isinstance(v, list) and len(v) == 6:
+                result = v
+                break
 
     if not isinstance(result, list) or len(result) != 6:
         raise ValueError(
             f"Esperava lista de 6 itens, recebi: {type(result).__name__} "
             f"com {len(result) if isinstance(result, list) else '?'} itens"
         )
-    return result
+    # Pós-LLM: garante <=60 chars (corte em palavra) e títulos únicos entre si
+    return dedupe_titulos(result)
 
 
 # ---------------------------------------------------------------------------
@@ -908,23 +952,23 @@ Retorne SOMENTE o nome, sem aspas, sem ponto final, sem explicação.\
 # 5. gerar_descricao_kit_ml
 # ---------------------------------------------------------------------------
 
-def gerar_descricao_kit_ml(kit_nome: str, apostilas: list[dict], total_exercicios: int) -> str:
+def gerar_descricao_kit_ml(kit_nome: str, apostilas: list[dict], total_exercicios: int, publico_alvo: str = "idosos 60+") -> str:
     """Gera descrição para anúncio de kit no ML, mencionando todas as apostilas."""
     nomes = ", ".join(a.get("topico_nome", a.get("nome", a.get("name", str(a)))) for a in apostilas)
     qtd = len(apostilas)
 
     prompt = f"""\
-Crie uma descrição de produto para o Mercado Livre de um kit de apostilas físicas impressas de estimulação cognitiva.
+Crie uma descrição de produto para o Mercado Livre de um kit de apostilas físicas impressas.
 
 Kit: {kit_nome}
 Apostilas incluídas ({qtd}): {nomes}
 Total de exercícios: {total_exercicios}
-Público: idosos 60+, cuidadores, terapeutas ocupacionais
+Público: {publico_alvo}
 Marca: CogniVita
 
 Use EXATAMENTE este formato (mantenha os títulos em maiúscula, use • para bullets):
 
-KIT DE APOSTILAS FÍSICAS — ESTIMULAÇÃO COGNITIVA PARA IDOSOS
+KIT DE APOSTILAS FÍSICAS — {kit_nome.upper()}
 [1 parágrafo de 2 frases apresentando o kit e as {qtd} apostilas incluídas: {nomes}]
 
 Indicado para:
@@ -953,13 +997,13 @@ ESPECIFICAÇÕES
 • Quantidade: {qtd} apostilas / {total_exercicios} atividades no total
 • Tamanho: A4
 • Impressão: Preto e Branco
-• Fonte: Ampliada (ideal para idosos)
+• Público: {publico_alvo}
 
 Retorne APENAS o texto acima preenchido, sem JSON, sem markdown, sem comentários.\
 """
 
     return _chat_completions([
-        {"role": "system", "content": _SYSTEM_TITULOS},
+        {"role": "system", "content": _system_titulos(publico_alvo)},
         {"role": "user", "content": prompt},
     ], max_tokens=700, json_mode=False).strip()
 
@@ -1003,7 +1047,7 @@ Retorne SOMENTE o título final, sem aspas, sem chaves, sem JSON, sem explicaç�
                 titulo = parsed[0].get("titulo", titulo) if isinstance(parsed[0], dict) else str(parsed[0])
         except Exception:
             titulo = titulo.lstrip("{[").split(":")[-1].strip().strip('"}]').strip()
-    return titulo[:60] if len(titulo) > 60 else titulo
+    return fit_titulo(titulo)
 
 
 # ---------------------------------------------------------------------------
