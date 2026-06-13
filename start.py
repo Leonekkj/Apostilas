@@ -1,13 +1,16 @@
 """
-start.py — Entry point local e Render/Railway.
-Detecta ambiente automaticamente via DATABASE_URL:
-  - Com DATABASE_URL  → hosted (Render/Railway): instala Playwright, usa PostgreSQL
-  - Sem DATABASE_URL  → local: pula instalações, usa SQLite (apostilas.db)
+start.py — Entry point (roda local; banco de produção no Neon).
+Detecta o banco via DATABASE_URL (carregada do .env):
+  - Com DATABASE_URL  → produção: PostgreSQL (Neon), garante Playwright
+  - Sem DATABASE_URL  → dev: SQLite (apostilas.db), pula instalações
 """
 import os
 import sys
 import subprocess
 import logging
+
+from dotenv import load_dotenv
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -45,20 +48,18 @@ def _instalar_playwright():
 
 def main():
     port = os.getenv("PORT", "8000")
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
     if IS_LOCAL:
-        logger.info("Modo LOCAL — SQLite (apostilas.db), sem instalação de Playwright")
+        logger.info("Modo DEV — SQLite (apostilas.db), sem instalação de Playwright")
     else:
-        logger.info("Modo HOSTED — PostgreSQL, instalando Playwright...")
+        logger.info("Modo PRODUÇÃO — PostgreSQL (Neon), verificando Playwright...")
         _instalar_playwright()
 
     # Inicia scheduler em background
     logger.info("Iniciando scheduler...")
-    subprocess.Popen(
-        [sys.executable, "scheduler.py"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.STDOUT,
-    )
+    # Herda stdout/stderr do processo pai — logs do scheduler aparecem no Render
+    subprocess.Popen([sys.executable, "scheduler.py"])
     logger.info("Scheduler iniciado")
 
     logger.info(f"Iniciando uvicorn na porta {port}...")

@@ -1,6 +1,8 @@
 """OAuth 2.0 authentication for Mercado Livre."""
 
 import os
+import secrets
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 from urllib.parse import urlencode
@@ -24,20 +26,39 @@ ML_AUTH_URL = "https://auth.mercadolivre.com.br/authorization"
 ML_TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
 
 
+# States pendentes do fluxo OAuth: {state: timestamp}. TTL de 10 min.
+_PENDING_STATES: dict = {}
+_STATE_TTL = 600
+
+
 def get_auth_url() -> str:
     """
     Retorna a URL de autorização OAuth 2.0 do Mercado Livre.
 
     Returns:
-        str: URL completa com parâmetros de autorização.
+        str: URL completa com parâmetros de autorização (inclui state anti-CSRF).
     """
+    state = secrets.token_urlsafe(16)
+    now = time.time()
+    # Limpa states expirados antes de registrar o novo
+    for s in [s for s, ts in _PENDING_STATES.items() if now - ts > _STATE_TTL]:
+        _PENDING_STATES.pop(s, None)
+    _PENDING_STATES[state] = now
+
     params = {
         "response_type": "code",
         "client_id": os.getenv("ML_CLIENT_ID", ML_CLIENT_ID),
         "redirect_uri": os.getenv("ML_REDIRECT_URI", ML_REDIRECT_URI).strip(),
+        "state": state,
     }
     query_string = urlencode(params)
     return f"{ML_AUTH_URL}?{query_string}"
+
+
+def consume_state(state: str) -> bool:
+    """Valida e consome um state do fluxo OAuth. Retorna False se desconhecido/expirado."""
+    ts = _PENDING_STATES.pop(state, None) if state else None
+    return ts is not None and (time.time() - ts) <= _STATE_TTL
 
 
 def exchange_code(code: str) -> dict:
@@ -62,7 +83,7 @@ def exchange_code(code: str) -> dict:
         "redirect_uri": redirect_uri,
     }
 
-    response = requests.post(ML_TOKEN_URL, data=payload)
+    response = requests.post(ML_TOKEN_URL, data=payload, timeout=15)
 
     if response.status_code != 200:
         error_data = response.json()
@@ -129,7 +150,7 @@ def refresh_token_if_needed() -> str:
         "refresh_token": refresh_token,
     }
 
-    response = requests.post(ML_TOKEN_URL, data=payload)
+    response = requests.post(ML_TOKEN_URL, data=payload, timeout=15)
 
     if response.status_code != 200:
         error_data = response.json()

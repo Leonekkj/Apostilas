@@ -20,15 +20,13 @@ ML_PICTURES_ENDPOINT = f"{ML_API_BASE}/pictures"
 ML_ITEMS_ENDPOINT = f"{ML_API_BASE}/items"
 
 # MLB455868 = Ebooks                — exclusão automática por PI
-# MLB437616 = Livros Físicos        — exige GTIN/ISBN que apostilas autorais não têm
 # MLB445795 = Cursos Completos      — ML desativa por "categoria incorreta"
-# MLB1726   = Informática/Softwares — ML classifica como "Softwares educacionais" → flagged
-_CATS_BLOQUEADAS = {"MLB455868", "MLB437616", "MLB445795", "MLB1726"}
+# MLB1726   = Informática/Softwares — ML classifica como "Softwares educacionais" -> flagged
+# MLB437616 = Livros Físicos — exige GTIN via API (só aceito pelo site ML, não pela API)
+_CATS_BLOQUEADAS = {"MLB455868", "MLB445795", "MLB1726", "MLB437616"}
 
-# Categorias seguras para apostilas (sem GTIN, sem flag de digital/software)
-# MLB1227 = Outros (Livros, Revistas e Comics) — neutro, aceito para apostilas físicas sem ISBN
-# MLB271599 = Apostilas e Material Didático (Livros) — mais específico, preferido
-_CAT_APOSTILA = os.getenv("ML_CATEGORIA_FISICO_ID", "MLB271599")
+# MLB1227 = Outros (Livros, Revistas e Comics) — sem GTIN, aceito via API para apostilas físicas
+_CAT_APOSTILA = os.getenv("ML_CATEGORIA_FISICO_ID", "MLB1227")
 _FALLBACK_DIG = os.getenv("ML_CATEGORIA_DIGITAL_ID", "MLB1227")
 _FALLBACK_FIS = _CAT_APOSTILA
 # Legado: ML_CATEGORIA_ID sobrescreve tudo
@@ -36,25 +34,44 @@ _legado = os.getenv("ML_CATEGORIA_ID")
 
 # Whitelist: domain_discovery só é aceito se retornar uma dessas categorias
 _CATS_ACEITAS = {
-    "MLB271599",  # Apostilas e Material Didático
-    "MLB1227",    # Outros (Livros, Revistas e Comics)
+    "MLB1227",    # Outros (Livros, Revistas e Comics) — preferido para apostilas via API
     "MLB48694",   # Livros de Texto e Estudo
-    "MLB1648",    # Livros, Revistas e Comics (pai)
 }
+
+# Configuração por nicho: o que muda entre públicos-alvo
+# genre_id: IDs válidos do ML para BOOK_GENRE em MLB437616
+#   7538151 = Infantil | 13061823 = Juvenil | 7538148 = Autoajuda
+_NICHE_ATTRS = {
+    "idosos":        {"min_age": "60 anos", "genre_id": "7538148",  "genre_name": "Autoajuda"},
+    "tdah":          {"min_age": "5 anos",  "genre_id": "7538151",  "genre_name": "Infantil"},
+    "autismo":       {"min_age": "3 anos",  "genre_id": "7538151",  "genre_name": "Infantil"},
+    "dislexia":      {"min_age": "6 anos",  "genre_id": "7538151",  "genre_name": "Infantil"},
+    "avc":           {"min_age": "18 anos", "genre_id": "7538148",  "genre_name": "Autoajuda"},
+    "reabilitacao":  {"min_age": "18 anos", "genre_id": "7538148",  "genre_name": "Autoajuda"},
+    "cuidadores":    {"min_age": "18 anos", "genre_id": "7538148",  "genre_name": "Autoajuda"},
+}
+
+def _niche_config(publico_alvo: str) -> dict:
+    """Retorna config de nicho baseada no publico_alvo do topico."""
+    pa = publico_alvo.lower()
+    for key, cfg in _NICHE_ATTRS.items():
+        if key in pa:
+            return cfg
+    return {"min_age": "18 anos", "genre_id": "7538148", "genre_name": "Autoajuda"}
 
 
 def _safe_cat(cat: str, is_digital: bool) -> str:
     """Garante que a categoria nunca seja uma das bloqueadas (ex: Ebooks)."""
     if cat in _CATS_BLOQUEADAS:
         fallback = _FALLBACK_DIG if is_digital else _FALLBACK_FIS
-        print(f"[ML] BLOQUEADO categoria {cat} → usando {fallback}")
+        print(f"[ML] BLOQUEADO categoria {cat} -> usando {fallback}")
         return fallback
     return cat
 
 
 def _predict_categoria(titulo: str, is_digital: bool) -> str:
     """Retorna categoria para o título. Domain_discovery só aceita categorias da whitelist.
-    Físico → MLB271599 (Apostilas e Material Didático). Digital → MLB1227 (Outros/Livros)."""
+    Físico -> MLB271599 (Apostilas e Material Didático). Digital -> MLB1227 (Outros/Livros)."""
     fallback = _FALLBACK_DIG if is_digital else _FALLBACK_FIS
 
     if _legado:
@@ -96,29 +113,13 @@ def _get_brand_images() -> list[str]:
 
 def _garantir_titulo_unico(titulo: str, anuncio_id: int) -> str:
     """Garante que nenhum outro anúncio publicado tem o mesmo título, adicionando Vol. N se necessário."""
-    import re
-
-    def _count(t: str) -> int:
-        with database._get_conn() as conn:
-            cur = database._cursor(conn)
-            cur.execute(
-                f"SELECT COUNT(*) as cnt FROM anuncios WHERE titulo = {database.PH} AND ml_id IS NOT NULL AND status = 'publicado' AND id != {database.PH}",
-                [t, anuncio_id],
-            )
-            row = cur.fetchone()
-            return row["cnt"] if isinstance(row, dict) else row[0]
-
-    if _count(titulo) == 0:
-        return titulo
-
-    base = re.sub(r'\s+Vol\.\s*\d+$', '', titulo, flags=re.IGNORECASE).strip()
-    for n in range(2, 30):
-        sufixo = f" Vol. {n}"
-        candidato = (base[:60 - len(sufixo)].rsplit(" ", 1)[0] + sufixo)[:60]
-        if _count(candidato) == 0:
-            print(f"[ML] título duplicado resolvido: {titulo!r} → {candidato!r}")
-            return candidato
-    return titulo
+    import validacao
+    candidato = validacao.titulo_unico_no_banco(
+        titulo, excluir_id=anuncio_id, incluir_rascunhos=False
+    )
+    if candidato != titulo:
+        print(f"[ML] título duplicado resolvido: {titulo!r} -> {candidato!r}")
+    return candidato
 
 
 def _garantir_imagem_unica(imagem_path: str, anuncio_id: int, anuncio: dict) -> str:
@@ -152,10 +153,16 @@ def _garantir_imagem_unica(imagem_path: str, anuncio_id: int, anuncio: dict) -> 
             if v == current_v:
                 continue
             candidate = f"{base_path}_v{v}.{ext}"
-            exists = _storage.is_url(candidate) or os.path.exists(candidate)
+            if _storage.is_url(candidate):
+                try:
+                    exists = requests.head(candidate, timeout=4).status_code == 200
+                except Exception:
+                    exists = False
+            else:
+                exists = os.path.exists(candidate)
             if exists and _count(candidate) == 0:
                 database.atualizar_anuncio(anuncio_id, imagem_path=candidate)
-                print(f"[ML] imagem duplicada resolvida: _v{current_v} → _v{v}")
+                print(f"[ML] imagem duplicada resolvida: _v{current_v} -> _v{v}")
                 return candidate
 
     # Regenera com próxima paleta
@@ -196,10 +203,19 @@ def publicar_anuncio(anuncio_id: int) -> str:
     if anuncio is None:
         raise RuntimeError(f"Anúncio {anuncio_id} não encontrado")
 
-    # Truncate title to 60 chars in DB if needed (fix stale titles from before the fix)
-    titulo_db = anuncio.get("titulo", "")
-    if len(titulo_db) > 60:
-        database.atualizar_anuncio(anuncio_id, titulo=titulo_db[:60])
+    # Validação central: corrige o seguro (título >60 → corte em palavra),
+    # bloqueia o incorrigível (preço <= 0, título vazio) antes de chamar o ML
+    import validacao
+    correcoes, corrigidos, bloqueios = validacao.validar_anuncio(anuncio, contexto="publicacao")
+    if bloqueios:
+        msg = "; ".join(bloqueios)
+        database.atualizar_anuncio(anuncio_id, status="erro", erro_msg=f"validação: {msg}")
+        raise RuntimeError(f"Anúncio {anuncio_id} bloqueado na validação: {msg}")
+    if correcoes:
+        database.atualizar_anuncio(anuncio_id, **correcoes)
+        anuncio.update(correcoes)
+        for m in corrigidos:
+            print(f"[validacao] publicar_anuncio #{anuncio_id}: {m}")
 
     # 2. Get valid ML token
     try:
@@ -212,9 +228,17 @@ def publicar_anuncio(anuncio_id: int) -> str:
         imagem_path = anuncio.get("imagem_path") or ""
         print(f"[ML] publicar_anuncio #{anuncio_id}: imagem_path={imagem_path!r}")
 
-        # Se não tiver imagem ou o arquivo não existir mais no disco (filesystem efêmero), gera on-demand
+        # Se não tiver imagem ou o arquivo não existir (disco ou R2), gera on-demand
         import storage as _storage
-        imagem_ausente = not imagem_path or (not _storage.is_url(imagem_path) and not os.path.exists(imagem_path))
+        if not imagem_path:
+            imagem_ausente = True
+        elif _storage.is_url(imagem_path):
+            try:
+                imagem_ausente = requests.head(imagem_path, timeout=5).status_code != 200
+            except Exception:
+                imagem_ausente = True
+        else:
+            imagem_ausente = not os.path.exists(imagem_path)
         if imagem_ausente and anuncio.get("apostila_id"):
             try:
                 from generator import images as _gen_images
@@ -279,6 +303,38 @@ def publicar_anuncio(anuncio_id: int) -> str:
 
         imagem_path = _garantir_imagem_unica(imagem_path, anuncio_id, anuncio)
 
+        # Garante que v1, v2, v3 existam no R2 (ML exige mínimo 3 imagens)
+        import re as _re
+        if imagem_path and _storage.is_url(imagem_path):
+            match_v = _re.search(r'(_v\d+)(\.png|\.jpg)$', imagem_path, _re.IGNORECASE)
+            if match_v and anuncio.get("apostila_id"):
+                base_url = imagem_path[:match_v.start()]
+                ext = match_v.group(2)
+                try:
+                    from generator import images as _gen_images
+                    import requests as _req
+                    topico_dict = {
+                        "id":   anuncio.get("topico_id"),
+                        "nome": anuncio.get("topico_nome", ""),
+                        "slug": anuncio.get("topico_slug", "geral"),
+                    }
+                    for v in [1, 2, 3]:
+                        url_v = f"{base_url}_v{v}{ext}"
+                        try:
+                            resp = _req.head(url_v, timeout=5)
+                            if resp.status_code == 200:
+                                continue
+                        except Exception:
+                            pass
+                        print(f"[ML] gerando variacao v{v} e enviando para R2...")
+                        paths = _gen_images.gerar_capas(anuncio["apostila_id"], topico_dict,
+                                                        anuncio.get("num_exercicios") or 60, variacao=v)
+                        if paths:
+                            uploaded = _storage.upload(paths[0])
+                            print(f"[ML] v{v} enviada para R2: {uploaded}")
+                except Exception as _e:
+                    print(f"[ML] falha ao garantir 3 variações: {_e}")
+
         picture_ids = _upload_pictures(token, imagem_path)
         if not picture_ids:
             raise RuntimeError(
@@ -286,6 +342,10 @@ def publicar_anuncio(anuncio_id: int) -> str:
                 "Verifique se a geração de capa está funcionando ou adicione imagens em assets/brand/."
             )
         print(f"[ML] publicar_anuncio #{anuncio_id}: {len(picture_ids)} imagem(ns) enviada(s)")
+
+        # Aguarda ML processar as imagens antes de criar o listing (evita item.pictures.unavailable)
+        import time as _time
+        _time.sleep(2)
 
         # 4. Create listing on ML
         ml_id = _create_listing(token, anuncio, picture_ids)
@@ -338,23 +398,24 @@ def _upload_single(token: str, imagem_path: str) -> Optional[str]:
 
     import storage as _storage
     if _storage.is_url(imagem_path):
-        print(f"[ML] _upload_single: enviando via URL R2 → {imagem_path}")
+        print(f"[ML] _upload_single: enviando via URL R2 -> {imagem_path}")
         response = requests.post(
             ML_PICTURES_ENDPOINT,
             json={"source": imagem_path},
             params={"access_token": token},
+            timeout=30,
         )
     else:
         if not os.path.exists(imagem_path):
-            print(f"[ML] _upload_single: arquivo não existe → {imagem_path}")
+            print(f"[ML] _upload_single: arquivo não existe -> {imagem_path}")
             return None
         size = os.path.getsize(imagem_path)
         print(f"[ML] _upload_single: enviando arquivo {imagem_path} ({size} bytes)")
         with open(imagem_path, "rb") as f:
-            response = requests.post(ML_PICTURES_ENDPOINT, files={"file": f}, params={"access_token": token})
+            response = requests.post(ML_PICTURES_ENDPOINT, files={"file": f}, params={"access_token": token}, timeout=60)
 
     if response.status_code not in (200, 201):
-        print(f"[ML] _upload_single: falhou {response.status_code} → {response.text[:300]}")
+        print(f"[ML] _upload_single: falhou {response.status_code} -> {response.text[:300]}")
         return None
     pid = response.json().get("id")
     print(f"[ML] _upload_single: OK picture_id={pid}")
@@ -379,43 +440,45 @@ def _upload_pictures(token: str, imagem_path: str) -> list[str]:
                 ids.append(pid)
         return ids
 
-    # Fallback: capa gerada pelo Pillow + 2 variações adjacentes
+    # Capa gerada pelo Pillow: sempre tenta carregar v1, v2, v3 (mínimo 3 imagens para ML)
     import storage as _storage
     is_url = _storage.is_url(imagem_path)
     if not imagem_path or (not is_url and not os.path.exists(imagem_path)):
         return ids
 
-    main_id = _upload_single(token, imagem_path)
-    if main_id:
-        ids.append(main_id)
+    # Constrói lista de todas as variações a partir do path/URL da imagem principal
+    match = re.search(r'(_v\d+)(\.png|\.jpg)$', imagem_path, re.IGNORECASE)
+    if match:
+        base = imagem_path[:match.start()]
+        ext = match.group(2)
+        # Ordena para que a variação original venha primeiro
+        current_v = int(re.search(r'\d+', match.group(1)).group())
+        all_vs = [current_v] + [v for v in [1, 2, 3] if v != current_v]
+        candidates = [f"{base}_v{v}{ext}" for v in all_vs]
+    else:
+        candidates = [imagem_path]
 
-    if not is_url:
-        match = re.search(r'_v(\d+)\.png$', imagem_path)
-        if match:
-            v = int(match.group(1))
-            base = imagem_path[:match.start()]
-            others = [x for x in [1, 2, 3] if x != v]
-            for next_v in others[:2]:
-                next_path = f"{base}_v{next_v}.png"
-                if os.path.exists(next_path):
-                    pid = _upload_single(token, next_path)
-                    if pid:
-                        ids.append(pid)
+    for path in candidates:
+        if len(ids) >= 3:
+            break
+        # Verifica existência de cada candidato individualmente
+        if _storage.is_url(path):
+            try:
+                path_exists = requests.head(path, timeout=4).status_code == 200
+            except Exception:
+                path_exists = False
+        else:
+            path_exists = os.path.exists(path)
+        if path_exists:
+            pid = _upload_single(token, path)
+            if pid:
+                ids.append(pid)
 
     return ids
 
 
-def _fit_titulo(titulo: str, limit: int = 60) -> str:
-    """Trunca no limite de palavras completas, garantindo que 'PDF' apareça quando cabe."""
-    if len(titulo) <= limit:
-        return titulo
-    truncado = titulo[:limit].rsplit(" ", 1)[0].rstrip(" —|·")
-    # Se PDF estava no original mas caiu fora, adiciona compacto
-    if "PDF" in titulo and "PDF" not in truncado:
-        candidato = truncado[:limit - 4].rsplit(" ", 1)[0] + " PDF"
-        if len(candidato) <= limit:
-            return candidato
-    return truncado
+# Movido para validacao.py (fonte única). Alias preserva referências existentes.
+from validacao import fit_titulo as _fit_titulo
 
 
 def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
@@ -439,6 +502,53 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     # Barreira final — nunca deixa Ebooks chegar ao payload
     categoria_id = _safe_cat(categoria_id, is_digital)
     print(f"[ML] categoria selecionada: {categoria_id} (titulo={titulo[:50]!r})")
+    # Persiste a categoria efetivamente enviada — permite auditoria posterior
+    if anuncio.get("id"):
+        try:
+            database.atualizar_anuncio(anuncio["id"], categoria_id=categoria_id)
+        except Exception as _e:
+            print(f"[ML] falha ao persistir categoria_id: {_e}")
+
+    # Busca publico_alvo e colecao do topico para atributos dinâmicos
+    topico_id = anuncio.get("topico_id")
+    publico_alvo = "adultos"
+    colecao = "CogniVita"
+    if topico_id:
+        try:
+            topico = database.buscar_topico_por_id(topico_id)
+            if topico:
+                publico_alvo = topico.get("publico_alvo") or publico_alvo
+                colecao = topico.get("colecao") or colecao
+        except Exception as _e:
+            print(f"[ML] falha ao buscar topico {topico_id}: {_e}")
+
+    niche = _niche_config(publico_alvo)
+    ano = "2026"
+
+    # Atributos de livro — compatíveis com MLB1227 (Outros/Livros) e MLB437616
+    attributes = [
+        {"id": "BRAND",                        "value_name": "CogniVita"},
+        {"id": "TITLE",                        "value_name": titulo},
+        {"id": "BOOK_TITLE",                   "value_name": titulo},
+        {"id": "AUTHOR",                       "value_name": "CogniVita"},
+        {"id": "PUBLISHER",                    "value_name": "CogniVita"},
+        {"id": "BOOK_PUBLISHER",               "value_name": "CogniVita"},
+        {"id": "LANGUAGE",                     "value_name": "Português"},
+        {"id": "BOOK_EDITION",                 "value_name": ano},
+        {"id": "BOOK_COVER",                   "value_name": "Mole"},
+        {"id": "BOOK_COVER_MATERIAL",          "value_name": "Papel cartão mole"},
+        {"id": "BOOK_VOLUME",                  "value_name": ano},
+        {"id": "BOOK_SERIE",                   "value_name": ano},
+        {"id": "BOOK_VERSION",                 "value_name": ano},
+        {"id": "BOOK_COLLECTION",              "value_name": colecao},
+        {"id": "PUBLICATION_YEAR",             "value_name": ano},
+        {"id": "PAGES_NUMBER",                 "value_name": str(anuncio.get("num_exercicios") or 60)},
+        {"id": "MIN_RECOMMENDED_AGE",          "value_name": niche["min_age"]},
+        {"id": "BOOK_GENRE",                   "value_id": niche["genre_id"], "value_name": niche["genre_name"]},
+        {"id": "IS_WRITTEN_IN_CAPITAL_LETTERS","value_name": "Sim"},
+        {"id": "WITH_COLORING_PAGES",          "value_name": "Não"},
+        {"id": "WITH_AUGMENTED_REALITY",       "value_name": "Não"},
+    ]
 
     # Build item payload
     payload = {
@@ -450,20 +560,7 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
         "buying_mode": "buy_it_now",
         "listing_type_id": "gold_pro",
         "condition": "new",
-        "attributes": [
-            {"id": "BRAND",                    "value_name": "CogniVita"},
-            {"id": "AUTHOR",                   "value_name": "CogniVita"},
-            {"id": "LANGUAGE",                 "value_name": "Português"},
-            # MLB1726 (Educação e Referência) — obrigatórios
-            {"id": "DEVELOPER",                "value_name": "CogniVita"},
-            {"id": "EDUCATIONAL_SOFTWARE_NAME","value_name": titulo},
-            {"id": "MODEL",                    "value_name": "Apostila Física Impressa"},
-            # Qualidade do anúncio — características adicionais
-            {"id": "FORMAT",                   "value_id": "2431740" if not is_digital else "2132699",
-                                               "value_name": "Físico" if not is_digital else "Digital"},
-            {"id": "VERSION",                  "value_name": "1ª Edição"},
-            {"id": "WITH_UNLIMITED_LICENSE",   "value_id": "242084", "value_name": "Não"},
-        ],
+        "attributes": attributes,
     }
 
     if is_digital:
@@ -491,7 +588,7 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
 
     import json as _json
     print("[ML] PAYLOAD listing_type_id:", payload.get("listing_type_id"))
-    response = requests.post(ML_ITEMS_ENDPOINT, json=payload, headers=headers)
+    response = requests.post(ML_ITEMS_ENDPOINT, json=payload, headers=headers, timeout=30)
     print("[ML] RESPONSE status:", response.status_code)
     print("[ML] RESPONSE body:", response.text[:2000])
 
@@ -515,10 +612,37 @@ def _create_listing(token: str, anuncio: dict, picture_ids: list[str]) -> str:
     return data.get("id")
 
 
+def obter_imagem_anuncio(ml_id: str) -> Optional[str]:
+    """URL da foto principal do anúncio publicado (CDN do ML), em alta resolução.
+
+    Fonte da verdade para 'capa do PDF = foto do anúncio'. Retorna None se o
+    item não existir, não tiver fotos ou a API falhar (caller usa fallback).
+    """
+    if not ml_id:
+        return None
+    try:
+        token = auth.get_valid_token()
+        r = requests.get(
+            f"{ML_API_BASE}/items/{ml_id}",
+            params={"attributes": "pictures"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return None
+        pics = r.json().get("pictures") or []
+        if not pics:
+            return None
+        return pics[0].get("secure_url") or pics[0].get("url")
+    except Exception as e:
+        print(f"[ML] obter_imagem_anuncio({ml_id}) falhou: {e}")
+        return None
+
+
 def fix_categorias_ml() -> dict:
     """
     Itera todos os anúncios publicados no banco e atualiza a category_id no ML
-    para a categoria correta (físico → MLB437616, digital → MLB1227).
+    para a categoria correta (físico -> MLB437616, digital -> MLB1227).
 
     Returns:
         dict com listas 'atualizados', 'erros', 'sem_ml_id'.
@@ -552,7 +676,7 @@ def fix_categorias_ml() -> dict:
         )
         if r.status_code == 200:
             atualizados.append({"anuncio_id": an["id"], "ml_id": ml_id, "categoria": categoria_correta})
-            print(f"[ML fix-cat] OK {ml_id} → {categoria_correta} ({titulo[:40]})")
+            print(f"[ML fix-cat] OK {ml_id} -> {categoria_correta} ({titulo[:40]})")
         else:
             erros.append({"anuncio_id": an["id"], "ml_id": ml_id, "status": r.status_code, "detail": r.text[:300]})
             print(f"[ML fix-cat] ERRO {ml_id}: {r.status_code} {r.text[:200]}")
@@ -576,7 +700,7 @@ def importar_anuncios_ml() -> list[dict]:
     headers = {"Authorization": f"Bearer {token}"}
 
     # 1. Pega o user_id do vendedor
-    me = requests.get(f"{ML_API_BASE}/users/me", headers=headers)
+    me = requests.get(f"{ML_API_BASE}/users/me", headers=headers, timeout=15)
     if me.status_code != 200:
         raise RuntimeError(f"Erro ao buscar dados do usuário: {me.text}")
     user_id = me.json()["id"]
@@ -589,6 +713,7 @@ def importar_anuncios_ml() -> list[dict]:
             f"{ML_API_BASE}/users/{user_id}/items/search",
             params={"offset": offset, "limit": 50},
             headers=headers,
+            timeout=15,
         )
         if r.status_code != 200:
             break
@@ -607,7 +732,7 @@ def importar_anuncios_ml() -> list[dict]:
     for i in range(0, len(item_ids), 20):
         batch = item_ids[i:i+20]
         ids_str = ",".join(batch)
-        r = requests.get(f"{ML_API_BASE}/items", params={"ids": ids_str}, headers=headers)
+        r = requests.get(f"{ML_API_BASE}/items", params={"ids": ids_str}, headers=headers, timeout=15)
         if r.status_code != 200:
             continue
         for entry in r.json():
@@ -662,7 +787,7 @@ def pausar_anuncio(anuncio_id: int) -> None:
     }
     payload = {"status": "paused"}
 
-    response = requests.put(endpoint, json=payload, headers=headers)
+    response = requests.put(endpoint, json=payload, headers=headers, timeout=15)
 
     if response.status_code != 200:
         error_data = response.json()
@@ -678,7 +803,7 @@ def atualizar_preco_ml(ml_id: str, novo_preco: float) -> None:
     token = auth.get_valid_token()
     endpoint = f"{ML_ITEMS_ENDPOINT}/{ml_id}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    response = requests.put(endpoint, json={"price": novo_preco}, headers=headers)
+    response = requests.put(endpoint, json={"price": novo_preco}, headers=headers, timeout=15)
     if response.status_code != 200:
         error_msg = response.json().get("message", response.text)
         raise RuntimeError(f"ML API error {response.status_code}: {error_msg}")
@@ -698,7 +823,7 @@ def fechar_anuncio_ml(ml_id: str) -> bool:
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    response = requests.put(endpoint, json={"status": "closed"}, headers=headers)
+    response = requests.put(endpoint, json={"status": "closed"}, headers=headers, timeout=15)
 
     if response.status_code != 200:
         import logging as _log

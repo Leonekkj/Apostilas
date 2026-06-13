@@ -13,22 +13,11 @@ def _seller_id(token: str) -> str:
     return str(r.json()["id"])
 
 
-def enviar_pdf_ao_comprador(ml_order_id: str, comprador_id: str, pdf_url: str, nome_apostila: str) -> bool:
-    """
-    Envia mensagem com link do PDF ao comprador via ML Mensagens.
-
-    Returns True se enviado com sucesso, False caso contrário.
-    """
+def _enviar(ml_order_id: str, comprador_id: str, mensagem: str) -> bool:
+    """Envia mensagem ao comprador pela API de mensagens do ML (com fallback de endpoint)."""
     try:
         token = auth.get_valid_token()
         seller_id = _seller_id(token)
-
-        mensagem = (
-            f"Olá! Obrigado pela compra da {nome_apostila} 🎉\n\n"
-            f"Seu PDF está pronto para download:\n{pdf_url}\n\n"
-            "O arquivo é otimizado para impressão em A4 — pode imprimir em casa ou em qualquer gráfica.\n"
-            "Qualquer dúvida, é só chamar! 😊"
-        )
 
         payload = {
             "from": {"user_id": seller_id},
@@ -64,5 +53,27 @@ def enviar_pdf_ao_comprador(ml_order_id: str, comprador_id: str, pdf_url: str, n
 
     except Exception as e:
         import logging
-        logging.warning(f"[messages] Falha ao enviar PDF ao comprador {comprador_id}: {e}")
+        logging.warning(f"[messages] Falha ao enviar mensagem ao comprador {comprador_id}: {e}")
         return False
+
+
+def enviar_pdf_ao_comprador(ml_order_id: str, comprador_id: str, pdf_url: str, nome_apostila: str) -> bool:
+    """Envia mensagem com link do PDF ao comprador via ML Mensagens."""
+    mensagem = (
+        f"Olá! Obrigado pela compra da {nome_apostila} 🎉\n\n"
+        f"Seu PDF está pronto para download:\n{pdf_url}\n\n"
+        "O arquivo é otimizado para impressão em A4 — pode imprimir em casa ou em qualquer gráfica.\n"
+        "Qualquer dúvida, é só chamar! 😊"
+    )
+    return _enviar(ml_order_id, comprador_id, mensagem)
+
+
+def enviar_boas_vindas(ml_order_id: str, comprador_id: str) -> bool:
+    """Mensagem automática de boas-vindas para venda física nova (<= 350 chars)."""
+    mensagem = (
+        "Olá! Obrigado pela sua compra 😊 Sua apostila CogniVita é impressa sob demanda, "
+        "com capa colorida e encadernação espiral que abre totalmente plana para escrever. "
+        "Postamos em até 3 dias úteis com código de rastreio, que você acompanha por aqui. "
+        "Qualquer dúvida, é só chamar!"
+    )
+    return _enviar(ml_order_id, comprador_id, mensagem)

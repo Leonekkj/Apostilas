@@ -8,8 +8,14 @@ import gc
 import sys
 import time
 import argparse
-import logging
 import itertools
+import logging
+
+# Carrega .env ANTES de importar database (que lê DATABASE_URL no import) —
+# sem isso o scheduler cai em SQLite enquanto a API usa o Postgres do .env
+from dotenv import load_dotenv
+load_dotenv()
+
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 import database
@@ -23,14 +29,9 @@ DRY_RUN = False
 DAILY_LIMIT = 30
 PAUSE_BETWEEN = 5  # seconds
 
-_FATIAS = [30, 60, 90, 120, 150, 200]
-# Preços físicos retail — idênticos aos da api.py para consistência
-_PRECOS_PRODUTO = {30: 59.99, 60: 69.99, 90: 79.99, 120: 89.99, 150: 99.99, 200: 139.99}
-
-_TEMAS_CP = ["geral", "futebol", "culinaria", "animais", "brasil", "musica", "natureza"]
-_CP_VOLUMES = [("facil", 60), ("medio", 60), ("dificil", 60), ("gigante", 300)]
-_PRECOS_CP  = {"facil": 14.90, "medio": 17.90, "dificil": 19.90, "gigante": 34.90}
-_NIVEL_LABEL_CP = {"facil": "Fácil", "medio": "Médio", "dificil": "Difícil", "gigante": "Gigante"}
+# Fonte única de preços — pricing.py
+import pricing
+from pricing import FATIAS as _FATIAS, PRECOS_PRODUTO as _PRECOS_PRODUTO
 
 
 def _preco_apostila(apostila_id: int, num_exercicios: int) -> float:
@@ -45,7 +46,7 @@ def _preco_apostila(apostila_id: int, num_exercicios: int) -> float:
 
 
 def _publicar_anuncios_kit(anuncio_ids: list, kit_nome: str = ""):
-    """Publica uma lista de anúncios no ML com 0.3s de pausa entre cada um.
+    """Publica uma lista de anúncios no ML respeitando PAUSE_BETWEEN entre cada um.
     Pula anúncios com erro de validação anterior ou já publicados."""
     publicados = 0
     for aid in anuncio_ids:
@@ -61,10 +62,10 @@ def _publicar_anuncios_kit(anuncio_ids: list, kit_nome: str = ""):
             ml_id = ml_client.publicar_anuncio(aid)
             logger.info("Publicado anúncio %d → %s (%s)", aid, ml_id, kit_nome)
             publicados += 1
-            time.sleep(0.3)
+            time.sleep(PAUSE_BETWEEN)
         except Exception as e:
             logger.error("Erro ao publicar anúncio %d (%s): %s", aid, kit_nome, e)
-            time.sleep(0.3)
+            time.sleep(PAUSE_BETWEEN)
     return publicados
 
 
@@ -97,26 +98,42 @@ def sincronizar_e_gerar_pdfs():
     """Sincroniza pedidos pagos do ML e gera PDFs para apostilas vendidas que ainda não têm."""
     # 1. Sincroniza vendas
     try:
+        from ml import messages as ml_messages
         pedidos = ml_orders.buscar_pedidos_pagos()
         for pedido in pedidos:
             ml_order_id = str(pedido.get("id", ""))
             if not ml_order_id:
                 continue
             comprador_nickname = pedido.get("buyer", {}).get("nickname", "")
+            comprador_id = str(pedido.get("buyer", {}).get("id", ""))
             data_venda = pedido.get("date_created", "")
+            venda_nova = False
+            tipo_anuncio = ""
             for item in pedido.get("order_items", []):
                 ml_item_id = item.get("item", {}).get("id", "")
                 valor = float(item.get("unit_price", 0))
                 quantidade = int(item.get("quantity", 1))
                 anuncio_id = database.buscar_anuncio_id_por_ml_id(ml_item_id)
-                database.salvar_venda(
+                nova = database.salvar_venda(
                     ml_order_id=ml_order_id,
                     anuncio_id=anuncio_id,
                     comprador_nickname=comprador_nickname,
                     valor=valor,
                     quantidade=quantidade,
                     data_venda=data_venda,
+                    comprador_id=comprador_id,
                 )
+                venda_nova = venda_nova or nova
+                if anuncio_id and not tipo_anuncio:
+                    an = database.buscar_anuncio_por_id(anuncio_id)
+                    tipo_anuncio = (an or {}).get("tipo", "")
+
+            # Boas-vindas automática: só em venda NOVA e física
+            # (digital recebe a mensagem própria com o link do PDF via webhook)
+            if venda_nova and comprador_id and tipo_anuncio != "digital":
+                ok = ml_messages.enviar_boas_vindas(ml_order_id, comprador_id)
+                logger.info(f"Boas-vindas venda {ml_order_id}: {'enviada' if ok else 'falhou'}")
+                time.sleep(1)
         logger.info(f"Vendas sincronizadas: {len(pedidos)} pedidos")
     except Exception as e:
         logger.error(f"Erro ao sincronizar vendas: {e}")
@@ -128,14 +145,31 @@ def sincronizar_e_gerar_pdfs():
     logger.info(f"Apostilas vendidas sem PDF: {len(pendentes)}")
     for ap in pendentes:
         try:
-            import json
-            topico = {"nome": ap["topico_nome"]}
-            conteudo = json.loads(ap["conteudo_json"]) if ap["conteudo_json"] else {}
-            pdf_path = pdf_gen.gerar_pdf(ap["id"], topico, conteudo)
+            # capa_img: dormente — quando houver arte de IA boa (assets/capas_ia/
+            # ou gerador melhor), plugar aqui. Sem ela, sai a capa premium CSS.
+            capa_img = None
+
+            if ap.get("dificuldade"):
+                # Caça-palavras: gerador próprio (puzzles), NÃO o genérico de exercícios
+                from gerar_caca_palavras import gerar_pdf_caca_palavras
+                pdf_path = gerar_pdf_caca_palavras(
+                    ap["id"],
+                    ap.get("produto_nome") or "Caça-Palavras",
+                    ap.get("tema") or "geral",
+                    ap["dificuldade"],
+                    ap.get("num_exercicios") or 60,
+                    capa_img=capa_img,
+                )
+            else:
+                topico = {"nome": ap["topico_nome"]}
+                # gerar_pdf espera a STRING JSON (faz json.loads internamente)
+                conteudo_json = ap["conteudo_json"] or "{}"
+                pdf_path = pdf_gen.gerar_pdf(ap["id"], topico, conteudo_json, capa_img=capa_img)
             database.atualizar_pdf_apostila(ap["id"], pdf_path)
             logger.info(f"PDF gerado: apostila_id={ap['id']} path={pdf_path}")
         except Exception as e:
             logger.error(f"Erro ao gerar PDF apostila {ap['id']}: {e}")
+
 
 
 def gerar_kits_automaticos():
@@ -191,7 +225,7 @@ def gerar_kits_automaticos():
                     preco_individual = sum(
                         _preco_apostila(aid, num_ex) for aid in apostila_ids
                     )
-                    preco_kit = round(preco_individual * 0.85, 2)
+                    preco_kit = pricing.preco_kit(preco_individual)
 
                     total_exercicios = num_ex * r
                     titulos = gen_content.gerar_titulos_kit_ml(nome, apostilas_objs, total_exercicios)
@@ -228,125 +262,6 @@ def gerar_kits_automaticos():
     logger.info("Kits automáticos concluído: %d criados, %d pulados", kits_criados, kits_pulados)
 
 
-def gerar_caca_palavras_automaticos():
-    """Cria caça-palavras para todos os temas ainda não existentes (idempotente)."""
-    from generator import images as gen_images
-
-    topico = database.buscar_topico("caca-palavras")
-    if not topico:
-        logger.error("Tópico caca-palavras não encontrado no banco.")
-        return
-
-    topico_id  = topico["id"]
-    topico_cp  = {"id": topico_id, "nome": "Caça-Palavras", "slug": "caca-palavras"}
-    ja_existem = database.listar_temas_caca_palavras_existentes()
-    criados    = 0
-
-    for tema in _TEMAS_CP:
-        if tema in ja_existem:
-            continue
-
-        logger.info("Criando caça-palavras tema=%s", tema)
-        try:
-            for dificuldade, num_puzzles in _CP_VOLUMES:
-                nivel_l   = _NIVEL_LABEL_CP[dificuldade]
-                nome_vol  = f"Caça-Palavras {tema.title()} — {nivel_l}"
-                preco     = _PRECOS_CP[dificuldade]
-
-                # Título e descrição reutilizando as funções da API
-                from api import _titulo_caca_palavras, _descricao_caca_palavras
-                titulo_ml = _titulo_caca_palavras(nome_vol, tema, dificuldade, num_puzzles)
-                descricao = _descricao_caca_palavras(tema, dificuldade, num_puzzles)
-
-                produto_id  = database.criar_produto_caca_palavras(nome_vol, topico_id, tema, dificuldade)
-                apostila_id = database.salvar_apostila(topico_id, num_puzzles, "{}", produto_id)
-                anuncio_id  = database.criar_anuncio(apostila_id, "digital", 1, titulo_ml, preco, 1, "", None, descricao)
-
-                try:
-                    paths = gen_images.gerar_capas(apostila_id, topico_cp, num_puzzles)
-                    if paths:
-                        database.atualizar_anuncio(anuncio_id, imagem_path=paths[0])
-                except Exception as _img_e:
-                    logger.warning("Imagem caca-palavras %s/%s falhou: %s", tema, dificuldade, _img_e)
-
-                _publicar_anuncios_kit([anuncio_id], f"CP {tema}/{dificuldade}")
-                gc.collect()
-
-            criados += 1
-            logger.info("Caça-palavras criado: tema=%s", tema)
-        except Exception as e:
-            logger.error("Erro ao criar caça-palavras tema=%s: %s", tema, e)
-
-    logger.info("Caça-palavras automáticos: %d novos temas criados", criados)
-
-
-def gerar_kits_caca_palavras_automaticos():
-    """Cria kits combinando 2-3 temas diferentes de caça-palavras na mesma dificuldade (idempotente)."""
-    from generator import content as gen_content
-    from generator import images as gen_images
-
-    mapa = database.listar_apostilas_caca_palavras_por_dificuldade()
-    if not mapa:
-        logger.info("Kits caça-palavras: nenhuma apostila disponível.")
-        return
-
-    kits_criados = 0
-    kits_pulados = 0
-    MAX_KITS = 30  # limite por execução para controlar memória
-
-    for dificuldade, temas_map in mapa.items():
-        temas = list(temas_map.keys())
-        if len(temas) < 2:
-            continue
-
-        for r in [2, 3]:
-            if len(temas) < r:
-                continue
-            for combo in itertools.combinations(temas, r):
-                if kits_criados >= MAX_KITS:
-                    logger.info("Kits CP: limite %d atingido.", MAX_KITS)
-                    break
-
-                apostila_ids = [temas_map[t] for t in combo]
-                if database.kit_existe(apostila_ids):
-                    kits_pulados += 1
-                    continue
-
-                try:
-                    apostilas_objs = [database.buscar_apostila_por_id(aid) for aid in apostila_ids]
-                    nivel_l = _NIVEL_LABEL_CP.get(dificuldade, dificuldade.title())
-                    temas_nomes = " + ".join(t.title() for t in combo)
-                    nome = f"Kit Caça-Palavras {temas_nomes} {nivel_l}"[:50]
-
-                    kit_id = database.criar_kit(nome, apostila_ids)
-
-                    preco_unit = _PRECOS_CP.get(dificuldade, 17.90)
-                    preco_kit  = round(preco_unit * r * 0.85, 2)
-                    total_ex   = sum(a.get("num_exercicios", 60) for a in apostilas_objs)
-
-                    titulos  = gen_content.gerar_titulos_kit_ml(nome, apostilas_objs, total_ex)
-                    descricao = gen_content.gerar_descricao_kit_ml(nome, apostilas_objs, total_ex)
-                    all_imgs  = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs)
-
-                    novos_anuncio_ids = []
-                    for i, title in enumerate(titulos, start=1):
-                        variacao_img = ((i - 1) % 3) + 1
-                        img_path = next((p for p in all_imgs if f"_v{variacao_img}.png" in p), all_imgs[0] if all_imgs else None)
-                        anuncio_id = database.criar_anuncio(None, "fisico", i, title["titulo"], preco_kit, i, title.get("angulo", ""), kit_id, descricao)
-                        if img_path:
-                            database.atualizar_anuncio(anuncio_id, imagem_path=img_path)
-                        novos_anuncio_ids.append(anuncio_id)
-
-                    pub = _publicar_anuncios_kit(novos_anuncio_ids, nome)
-                    kits_criados += 1
-                    logger.info("Kit CP criado e publicado: %s (R$%.2f, %d anúncios)", nome, preco_kit, pub)
-                except Exception as e:
-                    logger.error("Erro kit CP %s/%s: %s", combo, dificuldade, e)
-                finally:
-                    gc.collect()
-
-    logger.info("Kits caça-palavras: %d criados, %d pulados", kits_criados, kits_pulados)
-
 
 def main():
     global DRY_RUN
@@ -374,10 +289,6 @@ def main():
     scheduler.add_job(sincronizar_e_gerar_pdfs, "interval", hours=1)
     # Gera kits automáticos diariamente às 6h
     scheduler.add_job(gerar_kits_automaticos, "cron", hour=6, minute=0)
-    # Cria caça-palavras novos temas às 7h
-    scheduler.add_job(gerar_caca_palavras_automaticos, "cron", hour=7, minute=0)
-    # Kits de caça-palavras às 7h30
-    scheduler.add_job(gerar_kits_caca_palavras_automaticos, "cron", hour=7, minute=30)
 
     logger.info("Scheduler iniciado. Publicações às 9h, 13h e 17h (horário de Brasília)")
     scheduler.start()

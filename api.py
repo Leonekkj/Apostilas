@@ -19,7 +19,9 @@ Endpoints:
 """
 
 import asyncio
+import json
 import os
+import secrets as _secrets
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -79,10 +81,11 @@ async def on_startup() -> None:
     await asyncio.to_thread(database.criar_tabelas)
     # Fixes diários: 3h da manhã (horário servidor = UTC)
     _scheduler.add_job(_fix_titulos_bg, "cron", hour=3, minute=0, id="fix_titulos")
-    _scheduler.add_job(_fix_caca_palavras_digital_bg, "cron", hour=3, minute=15, id="fix_cp_digital")
+    # REGRA DE NEGÓCIO: produto digital é PROIBIDO no ML (já causou suspensão).
+    # O job fix_cp_digital (convertia caça-palavras → digital) foi DESATIVADO.
     _scheduler.add_job(_fix_imagens_pillow_bg, "cron", hour=4, minute=0, id="fix_imagens")
     _scheduler.start()
-    print("[scheduler] Jobs diários registrados: fix_titulos, fix_cp_digital, fix_imagens")
+    print("[scheduler] Jobs diários registrados: fix_titulos, fix_imagens")
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +105,7 @@ def _require_auth(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="ADMIN_TOKEN não configurado no servidor",
         )
-    if credentials is None or credentials.credentials != ADMIN_TOKEN:
+    if credentials is None or not _secrets.compare_digest(credentials.credentials, ADMIN_TOKEN):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token inválido ou ausente",
@@ -111,20 +114,16 @@ def _require_auth(
 
 
 # ---------------------------------------------------------------------------
-# Price table
+# Price table — fonte única em pricing.py
 # ---------------------------------------------------------------------------
 
-_FATIAS = [30, 60, 90, 120, 150, 200]
-# Preços físicos reais (verificados nos anúncios publicados no ML)
-_PRECOS_PRODUTO = {30: 59.99, 60: 69.99, 90: 79.99, 120: 89.99, 150: 99.99, 200: 139.99}
-# Preços digitais (mantidos nos valores anteriores)
-_PRECOS_DIGITAL = {30: 16.00, 60: 24.00, 90: 32.00, 120: 40.00, 150: 48.00, 200: 56.00}
-_PRECOS_CACA_PALAVRAS = {
-    "facil":   14.90,
-    "medio":   17.90,
-    "dificil": 19.90,
-    "gigante": 34.90,
-}
+import pricing
+from pricing import (
+    FATIAS as _FATIAS,
+    PRECOS_PRODUTO as _PRECOS_PRODUTO,
+    PRECOS_DIGITAL as _PRECOS_DIGITAL,
+    PRECOS_CACA_PALAVRAS as _PRECOS_CACA_PALAVRAS,
+)
 
 _TEMAS_LABEL = {
     "geral":     "para Idosos",
@@ -156,22 +155,20 @@ _NIVEL_LABEL = {
 
 
 def _titulo_caca_palavras(nome: str, tema: str, dificuldade: str, num_puzzles: int) -> str:
-    """Gera título ≤60 chars garantindo que 'PDF' sempre apareça completo."""
+    """Gera título ≤60 chars para caça-palavras FÍSICO (digital é proibido no ML)."""
     nivel_l = _NIVEL_LABEL.get(dificuldade, dificuldade.title())
     tema_c  = _TEMAS_CURTO.get(tema, tema.title())
 
     if tema_c:
-        # Ex: "Caça-Palavras Futebol 60 Puzzles Nível Difícil PDF" = 50 chars
-        titulo = f"Caça-Palavras {tema_c} {num_puzzles} Puzzles Nível {nivel_l} PDF"
+        # Ex: "Caça-Palavras Futebol 60 Puzzles Nível Difícil Impresso"
+        titulo = f"Caça-Palavras {tema_c} {num_puzzles} Puzzles Nível {nivel_l} Impresso"
     else:
-        # Ex: "Caça-Palavras 300 Puzzles Nível Gigante Idosos PDF" = 50 chars
-        titulo = f"Caça-Palavras {num_puzzles} Puzzles Nível {nivel_l} Idosos PDF"
+        # Ex: "Caça-Palavras 300 Puzzles Nível Gigante Idosos Impresso"
+        titulo = f"Caça-Palavras {num_puzzles} Puzzles Nível {nivel_l} Idosos Impresso"
 
-    # Segurança: truncar na última palavra sem cortar PDF
+    # Segurança: truncar na última palavra
     if len(titulo) > 60:
         titulo = titulo[:60].rsplit(" ", 1)[0]
-        if "PDF" not in titulo:
-            titulo = (titulo[:55].rsplit(" ", 1)[0] + " PDF")[:60]
 
     return titulo
 
@@ -433,7 +430,7 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
         for _, _, _, image_paths in resultados:
             generated_files.extend(image_paths)
 
-        # Fase 4: cria anúncios físico + digital para cada apostila
+        # Fase 4: cria apenas anúncio físico por apostila (sem digital)
         apostilas_result = []
         tabela = body.precos or _PRECOS_PRODUTO
         for (posicao, num_ex, apostila_id), (titulo, descricao, descricao_digital, image_paths) in zip(apostilas_db, resultados):
@@ -443,7 +440,7 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
                 image_path = await asyncio.to_thread(_storage.upload, image_path)
             preco_fisico = float(tabela.get(str(num_ex), tabela.get(num_ex, _PRECOS_PRODUTO.get(num_ex, 29.90))))
 
-            # Anúncio físico
+            # Anúncio físico apenas
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,
                 apostila_id, "fisico", posicao, titulo, preco_fisico, posicao, "", None, descricao,
@@ -452,29 +449,10 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
             if image_path:
                 await asyncio.to_thread(database.atualizar_anuncio, anuncio_id, imagem_path=image_path)
 
-            # Anúncio digital — 40% do físico, título limpo + "PDF Digital" (máx 60 chars)
-            _remover = ["Apostila Física", "Apostila Fisica", "Impresso", "Impressa", "Físico", "Fisico"]
-            titulo_base = titulo
-            for palavra in _remover:
-                titulo_base = titulo_base.replace(palavra, "").replace("  ", " ").strip()
-            sufixo = " PDF Digital"
-            max_base = 60 - len(sufixo)
-            if len(titulo_base) > max_base:
-                titulo_base = titulo_base[:max_base].rsplit(" ", 1)[0]
-            titulo_digital = (titulo_base + sufixo)[:60]
-            preco_digital = _PRECOS_DIGITAL.get(num_ex, round(preco_fisico * 0.40, 2))
-            anuncio_digital_id = await asyncio.to_thread(
-                database.criar_anuncio,
-                apostila_id, "digital", posicao, titulo_digital, preco_digital, posicao, "", None, descricao_digital,
-            )
-            created_anuncio_ids.append(anuncio_digital_id)
-            if image_path:
-                await asyncio.to_thread(database.atualizar_anuncio, anuncio_digital_id, imagem_path=image_path)
-
             apostilas_result.append({
                 "apostila_id": apostila_id, "num_exercicios": num_ex, "posicao": posicao,
                 "preco": preco_fisico, "titulo": titulo, "anuncio_id": anuncio_id,
-                "anuncio_digital_id": anuncio_digital_id, "imagem_path": image_path,
+                "imagem_path": image_path,
             })
 
         # Publica todos os anúncios imediatamente após criação
@@ -483,7 +461,6 @@ async def criar_produto_linha(body: ProdutoLinhaRequest, _auth=Depends(_require_
         ml_id_map = {p["anuncio_id"]: p["ml_id"] for p in pub_result["publicados"]}
         for ap in apostilas_result:
             ap["ml_id"] = ml_id_map.get(ap["anuncio_id"])
-            ap["ml_id_digital"] = ml_id_map.get(ap["anuncio_digital_id"])
 
         return {
             "produto_id": produto_id,
@@ -546,9 +523,10 @@ async def criar_produto_caca_palavras_endpoint(body: CacaPalavrasRequest, _auth=
             apostila_id = await asyncio.to_thread(
                 database.salvar_apostila, body.topico_id, num_puzzles, "{}", produto_id
             )
+            # REGRA: digital é proibido no ML — caça-palavras é FÍSICO impresso
             anuncio_id = await asyncio.to_thread(
                 database.criar_anuncio,
-                apostila_id, "digital", 1, titulo_ml, preco, 1, "", None, descricao,
+                apostila_id, "fisico", 1, titulo_ml, preco, 1, "", None, descricao,
             )
             registros.append((dificuldade, num_puzzles, nome_vol, preco, produto_id, apostila_id, anuncio_id))
 
@@ -655,7 +633,7 @@ async def criar_kit(body: KitRequest, _auth=Depends(_require_auth)):
 
         precos = await asyncio.gather(*[_preco_apostila(ap) for ap in apostilas])
         preco_individual = sum(precos)
-        preco_kit = round(preco_individual * 0.85, 2)
+        preco_kit = pricing.preco_kit(preco_individual)
 
         # Generate 6 ML titles + description for kit
         titulos = await asyncio.to_thread(
@@ -792,6 +770,86 @@ async def publicar_lote(_auth=Depends(_require_auth)):
     }
 
 
+@app.post("/api/admin/gerar-e-publicar/{topico_id}")
+async def gerar_e_publicar(
+    topico_id: int,
+    quantidade: int = 3,
+    _auth=Depends(_require_auth),
+):
+    """Cria `quantidade` produtos para o tópico, gera kits (duplo/triplo/completo) e publica tudo."""
+    topico = await asyncio.to_thread(database.buscar_topico_por_id, topico_id)
+    if topico is None:
+        raise HTTPException(status_code=404, detail=f"Tópico {topico_id} não encontrado")
+
+    # Descobre próxima série disponível
+    def _proxima_serie() -> int:
+        with database._get_conn() as conn:
+            cur = database._cursor(conn)
+            cur.execute(
+                f"SELECT COALESCE(MAX(serie), 0) + 1 AS proxima FROM produtos WHERE topico_id = {database.PH}",
+                [topico_id],
+            )
+            row = cur.fetchone()
+            return int(row["proxima"] if isinstance(row, dict) else row[0])
+
+    proxima = await asyncio.to_thread(_proxima_serie)
+
+    resumo_produtos = []
+    todas_apostilas: list[dict] = []  # acumula apostilas de todos os produtos
+
+    # ── 1. Cria produtos e publica anúncios individuais ──────────────────────
+    for i in range(quantidade):
+        serie = proxima + i
+        nome = f"{topico['nome']} CogniVita"
+        body = ProdutoLinhaRequest(nome=nome, topico_id=topico_id, serie=serie)
+        resultado = await criar_produto_linha(body, _auth=_auth)
+        resumo_produtos.append({
+            "produto_id": resultado["produto_id"],
+            "serie": serie,
+            "publicados": resultado.get("publicados", 0),
+        })
+        # Coleta apostilas criadas (tem apostila_id no resultado)
+        for ap in resultado.get("apostilas", []):
+            ap["serie"] = serie
+            todas_apostilas.append(ap)
+
+    # ── 2. Para cada produto, cria 3 kits e publica ───────────────────────────
+    # Apostilas por série: {serie: {num_ex: apostila_id}}
+    por_serie: dict[int, dict[int, int]] = {}
+    for ap in todas_apostilas:
+        por_serie.setdefault(ap["serie"], {})[ap["num_exercicios"]] = ap["apostila_id"]
+
+    resumo_kits = []
+    combos = {
+        "Duplo":    [60, 90],
+        "Triplo":   [90, 120, 150],
+        "Completo": [30, 60, 90, 120, 150, 200],
+    }
+
+    for serie, ex_map in por_serie.items():
+        for tipo_kit, exercicios in combos.items():
+            ids_kit = [ex_map[ex] for ex in exercicios if ex in ex_map]
+            if len(ids_kit) < 2:
+                continue
+            kit_nome = f"{topico['nome']} Kit {tipo_kit} Vol. {serie}"
+            kit_body = KitRequest(apostila_ids=ids_kit, nome=kit_nome)
+            kit_resultado = await criar_kit(kit_body, _auth=_auth)
+            resumo_kits.append({
+                "kit_id": kit_resultado["kit_id"],
+                "tipo": tipo_kit,
+                "serie": serie,
+                "publicados": len([a for a in kit_resultado.get("anuncios", []) if a.get("status") == "publicado"]),
+            })
+
+    return {
+        "topico": topico["nome"],
+        "produtos_criados": len(resumo_produtos),
+        "kits_criados": len(resumo_kits),
+        "resumo_produtos": resumo_produtos,
+        "resumo_kits": resumo_kits,
+    }
+
+
 @app.post("/api/admin/publicar-kits")
 async def publicar_kits(_auth=Depends(_require_auth), limite: int = 30):
     """Publica até `limite` anúncios de kit com status rascunho/erro.
@@ -857,6 +915,30 @@ async def deletar_produto(produto_id: int, _auth=Depends(_require_auth)):
             await asyncio.to_thread(database.atualizar_anuncio, an["id"], status="deletado")
     await asyncio.to_thread(database.deletar_produto, produto_id)
     return {"deleted": produto_id, "ml_fechados": ml_fechados}
+
+
+@app.delete("/api/admin/anuncios/inativos")
+async def deletar_anuncios_inativos(_auth=Depends(_require_auth)):
+    """Marca como 'deletado' todos os anúncios que não estão publicados (rascunho, erro, pausado)."""
+    def _buscar_inativos():
+        with database._get_conn() as conn:
+            cur = database._cursor(conn)
+            cur.execute(
+                "SELECT id, ml_id FROM anuncios WHERE status NOT IN ('publicado', 'deletado')"
+            )
+            return database._rows_to_dicts(cur.fetchall(), cur)
+
+    rows = await asyncio.to_thread(_buscar_inativos)
+
+    ml_fechados = 0
+    for row in rows:
+        if row.get("ml_id"):
+            ok = await asyncio.to_thread(ml_client.fechar_anuncio_ml, row["ml_id"])
+            if ok:
+                ml_fechados += 1
+        await asyncio.to_thread(database.atualizar_anuncio, row["id"], status="deletado")
+
+    return {"deletados": len(rows), "ml_fechados": ml_fechados}
 
 
 @app.delete("/api/kit/{kit_id}")
@@ -1176,7 +1258,7 @@ async def fix_precos_kits_ml(background_tasks: BackgroundTasks, _auth=Depends(_r
                         _PRECOS_PRODUTO.get(num_ex, 79.99)
                     )
                     total += preco_ap
-                kits_preco[kit_id] = round(total * 0.85, 2)
+                kits_preco[kit_id] = pricing.preco_kit(total)
 
         # 3. Atualiza DB e ML para cada anúncio com preço diferente
         corrigidos_db = 0
@@ -1315,11 +1397,13 @@ async def ml_auth():
 
 
 @app.get("/api/ml/callback")
-async def ml_callback(code: str):
+async def ml_callback(code: str, state: str = ""):
     try:
         from ml import auth as ml_auth_module
         from datetime import datetime, timedelta
         from fastapi.responses import RedirectResponse
+        if not ml_auth_module.consume_state(state):
+            raise HTTPException(status_code=400, detail="state inválido ou expirado — reinicie a conexão pelo dashboard")
         tokens = await asyncio.to_thread(ml_auth_module.exchange_code, code)
         expires_at = (datetime.utcnow() + timedelta(seconds=tokens["expires_in"])).isoformat()
         await asyncio.to_thread(database.salvar_ml_tokens,
@@ -2912,8 +2996,16 @@ async def ml_webhook(request: Request):
     """
     Recebe notificações do ML (orders, payments).
     Quando o pagamento é confirmado e o anúncio é digital, envia o PDF ao comprador.
+
+    Se ML_WEBHOOK_SECRET estiver configurado, exige ?secret= na URL
+    (registrar o webhook novamente via /api/admin/ml/registrar-webhook).
     """
-    from fastapi import Request as _Request
+    webhook_secret = os.getenv("ML_WEBHOOK_SECRET", "")
+    if webhook_secret:
+        recebido = request.query_params.get("secret", "")
+        if not _secrets.compare_digest(recebido, webhook_secret):
+            raise HTTPException(status_code=403, detail="secret inválido")
+
     body = await request.json()
 
     topic = body.get("topic") or body.get("type", "")
@@ -2966,7 +3058,7 @@ async def ml_webhook(request: Request):
 
             # Registra/atualiza a venda com comprador_id
             anuncio_id = database.buscar_anuncio_id_por_ml_id(ml_item_id)
-            database.salvar_venda(
+            nova_venda = database.salvar_venda(
                 ml_order_id=order_id,
                 anuncio_id=anuncio_id,
                 comprador_nickname=comprador_nick,
@@ -2976,8 +3068,13 @@ async def ml_webhook(request: Request):
                 comprador_id=comprador_id,
             )
 
-            # Só entrega PDF se for anúncio digital ainda não entregue
+            # Boas-vindas automática para venda física nova (digital recebe
+            # a mensagem própria com o link do PDF logo abaixo)
             venda = database.buscar_venda_por_order_id(order_id)
+            if nova_venda and comprador_id and (venda or {}).get("anuncio_tipo") != "digital":
+                ml_messages.enviar_boas_vindas(order_id, comprador_id)
+
+            # Só entrega PDF se for anúncio digital ainda não entregue
             if not venda or venda.get("pdf_entregue"):
                 continue
             if venda.get("anuncio_tipo") != "digital":
@@ -2997,6 +3094,10 @@ async def ml_webhook(request: Request):
                 import logging
                 logging.info(f"[webhook] Gerando PDF para apostila {apostila_id} sob demanda...")
                 try:
+                    # capa_img: dormente — plugar arte de IA aqui quando houver.
+                    # Sem ela, os renderers usam a capa premium CSS.
+                    capa_img = None
+
                     is_cp = apostila.get("topico_slug") == "caca-palavras"
                     if is_cp:
                         from gerar_caca_palavras import gerar_pdf_caca_palavras as _gerar_cp
@@ -3004,7 +3105,7 @@ async def ml_webhook(request: Request):
                         dificuldade = apostila.get("produto_dificuldade") or "medio"
                         num_puzzles = apostila.get("num_exercicios") or 60
                         nome_vol    = apostila.get("produto_nome") or "Caça-Palavras"
-                        pdf_path = _gerar_cp(apostila_id, nome_vol, tema, dificuldade, num_puzzles)
+                        pdf_path = _gerar_cp(apostila_id, nome_vol, tema, dificuldade, num_puzzles, capa_img=capa_img)
                         database.salvar_conteudo_apostila(apostila_id, "{}", pdf_path)
                     else:
                         from generator import content as _content, pdf as _gen_pdf
@@ -3014,7 +3115,7 @@ async def ml_webhook(request: Request):
                             "descricao": "",
                         }
                         conteudo_json = _content.gerar_conteudo(topico, apostila["num_exercicios"])
-                        pdf_path = _gen_pdf.gerar_pdf(apostila_id, topico, conteudo_json)
+                        pdf_path = _gen_pdf.gerar_pdf(apostila_id, topico, conteudo_json, capa_img=capa_img)
                         database.salvar_conteudo_apostila(apostila_id, conteudo_json, pdf_path)
                 except Exception as exc:
                     logging.warning(f"[webhook] Falha ao gerar PDF apostila {apostila_id}: {exc}")
@@ -3148,6 +3249,9 @@ async def registrar_webhook_ml(_auth=Depends(_require_auth)):
         raise HTTPException(status_code=400, detail="APP_URL não configurada no servidor")
 
     webhook_url = app_url.rstrip("/") + "/api/ml/webhook"
+    webhook_secret = os.getenv("ML_WEBHOOK_SECRET", "")
+    if webhook_secret:
+        webhook_url += f"?secret={webhook_secret}"
 
     try:
         token = await asyncio.to_thread(ml_auth_module.get_valid_token)
@@ -3169,9 +3273,413 @@ async def registrar_webhook_ml(_auth=Depends(_require_auth)):
     raise HTTPException(status_code=r.status_code, detail=r.text[:300])
 
 
+@app.get("/api/admin/auditoria-anuncios")
+async def auditoria_anuncios(corrigir: int = 0, aplicar_ml: int = 0, _auth=Depends(_require_auth)):
+    """Audita todos os anúncios não-deletados contra as regras canônicas.
+
+    Checks: títulos >60 / vazios / duplicados, preço <=0 / fora da tabela,
+    kits != 0.85×soma, categorias bloqueadas, anúncios sem imagem.
+
+    - corrigir=1  → aplica correções seguras NO BANCO
+    - aplicar_ml=1 → também propaga preço/título/categoria para o ML (requer corrigir=1)
+    """
+    import time as _time
+    import validacao
+    from ml.client import _CATS_BLOQUEADAS
+    from database import _get_conn, _cursor, PH, _rows_to_dicts
+
+    corrigir = bool(corrigir)
+    aplicar_ml = bool(aplicar_ml) and corrigir
+
+    def _put_ml(ml_id: str, payload: dict) -> Optional[str]:
+        """PUT no item do ML. Retorna None em sucesso ou mensagem de erro."""
+        import requests as _req
+        from ml import auth as ml_auth_module
+        token = ml_auth_module.get_valid_token()
+        r = _req.put(
+            f"https://api.mercadolibre.com/items/{ml_id}",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            timeout=15,
+        )
+        _time.sleep(0.5)
+        return None if r.status_code in (200, 201) else r.text[:200]
+
+    def _run():
+        rel = {
+            "titulos_vazios": [],
+            "titulos_longos": [],
+            "titulos_duplicados": [],
+            "precos_invalidos": [],
+            "precos_fora_tabela": [],
+            "kits_preco_errado": [],
+            "categorias_bloqueadas": [],
+            "categorias_desconhecidas": 0,
+            "sem_imagem": [],
+        }
+        aplicadas = []
+        bloqueados = []
+        erros_ml = []
+
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            cur.execute("""
+                SELECT an.id, an.titulo, an.preco, an.tipo, an.status, an.kit_id,
+                       an.apostila_id, an.ml_id, an.categoria_id, an.imagem_path,
+                       ap.num_exercicios, p.dificuldade
+                FROM anuncios an
+                LEFT JOIN apostilas ap ON an.apostila_id = ap.id
+                LEFT JOIN produtos p ON ap.produto_id = p.id
+                WHERE an.status IS NULL OR an.status != 'deletado'
+                ORDER BY an.id
+            """)
+            rows = _rows_to_dicts(cur.fetchall(), cur)
+
+        # --- (c) títulos vazios -------------------------------------------
+        for an in rows:
+            if not (an.get("titulo") or "").strip():
+                rel["titulos_vazios"].append({"id": an["id"], "status": an.get("status")})
+                if corrigir:
+                    database.atualizar_anuncio(an["id"], status="erro", erro_msg="auditoria: título vazio")
+                    bloqueados.append({"id": an["id"], "motivo": "título vazio → status=erro"})
+
+        # --- (a) títulos longos -------------------------------------------
+        for an in rows:
+            titulo = (an.get("titulo") or "").strip()
+            if len(titulo) > 60:
+                rel["titulos_longos"].append({"id": an["id"], "len": len(titulo), "titulo": titulo})
+                if corrigir:
+                    novo = validacao.titulo_unico_no_banco(
+                        validacao.fit_titulo(titulo), excluir_id=an["id"]
+                    )
+                    database.atualizar_anuncio(an["id"], titulo=novo)
+                    an["titulo"] = novo
+                    aplicadas.append({"id": an["id"], "campo": "titulo", "de": titulo, "para": novo})
+                    if aplicar_ml and an.get("ml_id") and an.get("status") == "publicado":
+                        err = _put_ml(an["ml_id"], {"title": novo})
+                        if err:
+                            erros_ml.append({"id": an["id"], "ml_id": an["ml_id"], "erro": err})
+
+        # --- (b) títulos duplicados (rascunhos E publicados) ---------------
+        por_titulo: dict = {}
+        for an in rows:
+            chave = (an.get("titulo") or "").strip().lower()
+            if chave:
+                por_titulo.setdefault(chave, []).append(an)
+        for chave, grupo in por_titulo.items():
+            if len(grupo) <= 1:
+                continue
+            grupo.sort(key=lambda a: a["id"])
+            ids = [a["id"] for a in grupo]
+            rel["titulos_duplicados"].append({"titulo": grupo[0]["titulo"], "ids": ids})
+            if corrigir:
+                # mantém o mais antigo; renomeia os demais
+                for an in grupo[1:]:
+                    novo = validacao.titulo_unico_no_banco(an["titulo"], excluir_id=an["id"])
+                    if novo == an["titulo"]:
+                        continue
+                    database.atualizar_anuncio(an["id"], titulo=novo)
+                    an["titulo"] = novo
+                    aplicadas.append({"id": an["id"], "campo": "titulo", "de": grupo[0]["titulo"], "para": novo})
+                    if aplicar_ml and an.get("ml_id") and an.get("status") == "publicado":
+                        err = _put_ml(an["ml_id"], {"title": novo})
+                        if err:
+                            erros_ml.append({"id": an["id"], "ml_id": an["ml_id"], "erro": err})
+
+        # --- (d) preços ----------------------------------------------------
+        for an in rows:
+            preco = float(an.get("preco") or 0)
+            tipo = an.get("tipo") or "fisico"
+            if preco <= 0:
+                rel["precos_invalidos"].append({"id": an["id"], "preco": preco, "status": an.get("status")})
+                if corrigir:
+                    database.atualizar_anuncio(an["id"], status="erro", erro_msg=f"auditoria: preço inválido ({preco})")
+                    bloqueados.append({"id": an["id"], "motivo": f"preço {preco} → status=erro"})
+                continue
+            if an.get("kit_id") or tipo == "importado":
+                continue  # kit: check (e); importado: espelho do ML, report-only via faixa
+            canonico = pricing.preco_canonico(
+                tipo, an.get("num_exercicios"), an.get("dificuldade")
+            )
+            # Sem dificuldade registrada mas preço bate com a tabela de
+            # caça-palavras → provável CP sem backfill; não flagra.
+            if not an.get("dificuldade") and preco in pricing.PRECOS_CACA_PALAVRAS.values():
+                continue
+            if canonico and abs(preco - canonico) > 0.01:
+                rel["precos_fora_tabela"].append(
+                    {"id": an["id"], "tipo": tipo, "preco": preco, "esperado": canonico}
+                )
+                if corrigir:
+                    database.atualizar_anuncio(an["id"], preco=canonico)
+                    aplicadas.append({"id": an["id"], "campo": "preco", "de": preco, "para": canonico})
+                    if aplicar_ml and an.get("ml_id") and an.get("status") == "publicado":
+                        try:
+                            ml_client.atualizar_preco_ml(an["ml_id"], canonico)
+                            _time.sleep(0.5)
+                        except Exception as e:
+                            erros_ml.append({"id": an["id"], "ml_id": an["ml_id"], "erro": str(e)[:200]})
+
+        # --- (e) kits: preço deve ser 0.85 × soma dos individuais ----------
+        kits_esperado: dict = {}
+        with _get_conn() as conn:
+            cur = _cursor(conn)
+            # tipo != 'importado': anúncios importados do ML têm preço definido
+            # manualmente — a regra 0.85×soma NÃO se aplica a eles
+            cur.execute("""
+                SELECT an.id, an.kit_id, an.preco, an.ml_id, an.status, k.apostila_ids
+                FROM anuncios an
+                JOIN kits k ON an.kit_id = k.id
+                WHERE (an.status IS NULL OR an.status != 'deletado')
+                  AND an.tipo != 'importado'
+            """)
+            kit_rows = _rows_to_dicts(cur.fetchall(), cur)
+            for row in kit_rows:
+                kit_id = row["kit_id"]
+                if kit_id not in kits_esperado:
+                    try:
+                        apostila_ids = json.loads(row.get("apostila_ids") or "[]")
+                    except Exception:
+                        apostila_ids = []
+                    total = 0.0
+                    for aid in apostila_ids:
+                        # Kit de caça-palavras: individual = tabela CP por dificuldade
+                        cur.execute(f"""
+                            SELECT p.dificuldade FROM apostilas ap
+                            LEFT JOIN produtos p ON ap.produto_id = p.id
+                            WHERE ap.id = {PH}
+                        """, (aid,))
+                        rd = cur.fetchone()
+                        dificuldade = (rd["dificuldade"] if rd else None) or ""
+                        preco_cp = pricing.PRECOS_CACA_PALAVRAS.get(dificuldade.lower())
+                        if preco_cp:
+                            total += preco_cp
+                            continue
+                        cur.execute(f"""
+                            SELECT preco FROM anuncios
+                            WHERE apostila_id = {PH}
+                              AND tipo IN ('fisico', 'importado')
+                              AND status NOT IN ('deletado')
+                              AND preco > 50
+                            ORDER BY preco DESC LIMIT 1
+                        """, (aid,))
+                        r = cur.fetchone()
+                        total += float(r["preco"]) if r and r["preco"] else pricing.PRECO_FALLBACK_INDIVIDUAL
+                    kits_esperado[kit_id] = pricing.preco_kit(total)
+        for row in kit_rows:
+            esperado = kits_esperado.get(row["kit_id"])
+            preco = float(row.get("preco") or 0)
+            if esperado and preco > 0 and abs(preco - esperado) > 0.01:
+                rel["kits_preco_errado"].append(
+                    {"id": row["id"], "kit_id": row["kit_id"], "preco": preco, "esperado": esperado}
+                )
+                if corrigir:
+                    database.atualizar_anuncio(row["id"], preco=esperado)
+                    aplicadas.append({"id": row["id"], "campo": "preco", "de": preco, "para": esperado})
+                    if aplicar_ml and row.get("ml_id") and row.get("status") == "publicado":
+                        try:
+                            ml_client.atualizar_preco_ml(row["ml_id"], esperado)
+                            _time.sleep(0.5)
+                        except Exception as e:
+                            erros_ml.append({"id": row["id"], "ml_id": row["ml_id"], "erro": str(e)[:200]})
+
+        # --- (f) categorias -------------------------------------------------
+        for an in rows:
+            cat = an.get("categoria_id")
+            if not cat:
+                rel["categorias_desconhecidas"] += 1
+            elif cat in _CATS_BLOQUEADAS:
+                rel["categorias_bloqueadas"].append(
+                    {"id": an["id"], "ml_id": an.get("ml_id"), "categoria": cat}
+                )
+        if aplicar_ml and rel["categorias_bloqueadas"]:
+            try:
+                resultado_cat = ml_client.fix_categorias_ml()
+                aplicadas.append({"campo": "categorias", "resultado": {
+                    "atualizados": len(resultado_cat.get("atualizados", [])),
+                    "erros": len(resultado_cat.get("erros", [])),
+                }})
+            except Exception as e:
+                erros_ml.append({"campo": "categorias", "erro": str(e)[:200]})
+
+        # --- (g) sem imagem (report-only; publicação gera on-demand) -------
+        for an in rows:
+            if not (an.get("imagem_path") or "").strip():
+                rel["sem_imagem"].append({
+                    "id": an["id"], "status": an.get("status"),
+                    "tem_fonte_para_gerar": bool(an.get("apostila_id") or an.get("kit_id")),
+                })
+
+        resumo = {k: (v if isinstance(v, int) else len(v)) for k, v in rel.items()}
+        resumo["total_anuncios"] = len(rows)
+        return {
+            "modo": {"corrigir": corrigir, "aplicar_ml": aplicar_ml},
+            "resumo": resumo,
+            "problemas": rel,
+            "correcoes_aplicadas": aplicadas,
+            "bloqueados": bloqueados,
+            "erros_ml": erros_ml,
+        }
+
+    return await asyncio.to_thread(_run)
+
+
 # ---------------------------------------------------------------------------
 # Dev runner
 # ---------------------------------------------------------------------------
+
+@app.get("/api/youtube/status")
+async def youtube_status(_auth=Depends(_require_auth)):
+    from youtube import auth as yt_auth
+    return {"autorizado": yt_auth.is_authorized()}
+
+
+@app.get("/api/youtube/auth")
+async def youtube_auth_url(_auth=Depends(_require_auth)):
+    from youtube import auth as yt_auth
+    if not yt_auth.CLIENT_ID or not yt_auth.CLIENT_SECRET:
+        raise HTTPException(status_code=400, detail="GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET não configurados no .env")
+    url = yt_auth.get_auth_url()
+    return {"url": url}
+
+
+@app.get("/api/youtube/callback")
+async def youtube_callback(code: str):
+    from youtube import auth as yt_auth
+    try:
+        yt_auth.exchange_code(code)
+        return {"status": "autorizado", "mensagem": "YouTube conectado com sucesso! Pode fechar esta aba."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/admin/anuncios/{anuncio_id}/gerar-clipe")
+async def gerar_clipe_anuncio(
+    anuncio_id: int,
+    modo: str = "ken_burns",
+    publicar_ml: bool = True,
+    _auth=Depends(_require_auth),
+):
+    """
+    Gera clipe de vídeo para o anúncio, faz upload para R2 e opcionalmente
+    envia para o ML (Decola). modo='ken_burns' (padrão, local) ou 'svd' (HuggingFace).
+    """
+    from generator import video as _video
+    from ml import auth as ml_auth_module
+    import storage as _storage
+    import requests as _req
+
+    anuncio = database.buscar_anuncio_por_id(anuncio_id)
+    if not anuncio:
+        raise HTTPException(status_code=404, detail="Anúncio não encontrado")
+
+    imagem_path = anuncio.get("imagem_path") or ""
+    if not imagem_path:
+        raise HTTPException(status_code=400, detail="Anúncio sem imagem — gere as capas primeiro")
+
+    # Gera o clipe localmente com nome único por anúncio
+    output_path = str(_video.OUTPUT_DIR / f"anuncio_{anuncio_id}_{modo}.mp4")
+    try:
+        local_video = await asyncio.to_thread(_video.gerar_clipe, imagem_path, output_path, modo)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar clipe: {e}")
+
+    # Upload para R2 com chave única
+    r2_key = f"anuncio_{anuncio_id}_{modo}.mp4"
+    r2_url = await asyncio.to_thread(_storage.upload_video, local_video, r2_key)
+
+    result = {"anuncio_id": anuncio_id, "video_url": r2_url, "modo": modo}
+
+    # Upload para YouTube (necessário para setar video_id no ML)
+    youtube_id = None
+    from youtube import auth as yt_auth
+    from youtube import upload as yt_upload
+    if yt_auth.is_authorized():
+        titulo_anuncio = anuncio.get("titulo", f"CogniVita – Anúncio {anuncio_id}")
+        try:
+            youtube_id = await asyncio.to_thread(
+                yt_upload.upload_video,
+                local_video,
+                titulo_anuncio,
+                "Apostila física CogniVita – Exercícios cognitivos impressos.",
+                "unlisted",
+            )
+            result["youtube_id"] = youtube_id
+            result["youtube_url"] = f"https://youtu.be/{youtube_id}"
+        except Exception as e:
+            result["youtube_error"] = str(e)
+    else:
+        result["youtube_status"] = "não autorizado — acesse /api/youtube/auth"
+
+    # Envia video_id para o ML
+    ml_id = anuncio.get("ml_id")
+    if publicar_ml and ml_id and youtube_id:
+        try:
+            token = await asyncio.to_thread(ml_auth_module.get_valid_token)
+            resp = _req.put(
+                f"https://api.mercadolibre.com/items/{ml_id}",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"video_id": youtube_id},
+                timeout=30,
+            )
+            if resp.status_code in (200, 201):
+                result["ml_status"] = "video_id enviado"
+            else:
+                result["ml_status"] = f"erro {resp.status_code}: {resp.text[:200]}"
+        except Exception as e:
+            result["ml_status"] = f"erro: {e}"
+    elif not youtube_id:
+        result["ml_status"] = "aguardando YouTube"
+    else:
+        result["ml_status"] = "não enviado (sem ml_id ou publicar_ml=false)"
+
+    return result
+
+
+@app.post("/api/admin/topicos/{topico_id}/gerar-clipes")
+async def gerar_clipes_topico(
+    topico_id: int,
+    modo: str = "ken_burns",
+    publicar_ml: bool = True,
+    _auth=Depends(_require_auth),
+):
+    """Gera clipes para todos os anúncios publicados de um tópico."""
+    anuncios = database.listar_anuncios(topico_id=topico_id, status="publicado", limite=999)
+    if not anuncios:
+        raise HTTPException(status_code=404, detail="Nenhum anúncio publicado para este tópico")
+
+    from generator import video as _video
+    from ml import auth as ml_auth_module
+    import storage as _storage
+    import requests as _req
+
+    resultados = []
+    for anuncio in anuncios:
+        anuncio_id = anuncio["id"]
+        imagem_path = anuncio.get("imagem_path") or ""
+        if not imagem_path:
+            resultados.append({"anuncio_id": anuncio_id, "status": "sem imagem"})
+            continue
+        try:
+            local_video = await asyncio.to_thread(_video.gerar_clipe, imagem_path, None, modo)
+            r2_url = await asyncio.to_thread(_storage.upload_video, local_video)
+            ml_id = anuncio.get("ml_id")
+            ml_status = "sem ml_id"
+            if publicar_ml and ml_id:
+                token = await asyncio.to_thread(ml_auth_module.get_valid_token)
+                resp = _req.put(
+                    f"https://api.mercadolibre.com/items/{ml_id}",
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    json={"video": {"url": r2_url}},
+                    timeout=30,
+                )
+                ml_status = "enviado" if resp.status_code in (200, 201) else f"erro {resp.status_code}"
+            resultados.append({"anuncio_id": anuncio_id, "video_url": r2_url, "ml_status": ml_status})
+        except Exception as e:
+            resultados.append({"anuncio_id": anuncio_id, "status": f"erro: {e}"})
+
+    ok = sum(1 for r in resultados if "video_url" in r)
+    return {"total": len(resultados), "ok": ok, "resultados": resultados}
+
 
 if __name__ == "__main__":
     import uvicorn

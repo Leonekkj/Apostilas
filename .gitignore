@@ -5,3 +5,32 @@ output/
 *.db
 .venv/
 venv/
+
+# Credenciais e sessões — NUNCA commitar
+shopee_cookies.json
+shopee_session/
+
+# Logs e saídas de execução
+*.log
+server_err.txt
+server_out.txt
+
+# Debug da automação Shopee (screenshots/dumps)
+shopee_*.png
+shopee_*.html
+shopee_debug*
+
+# Dumps e relatórios gerados
+export_sqlite.json
+auditoria_*.json
+cp_encontrados.txt
+kits_subprecificados.txt
+precos_baixos.txt
+
+# Scripts utilitários one-off (mover para scripts/ se virarem permanentes)
+_*.py
+_*.txt
+
+# Ambiente local
+.claude/
+=*
