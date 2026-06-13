@@ -254,6 +254,15 @@ def criar_tabelas() -> None:
             ("shopee_item_id","TEXT"),
             ("shopee_status", "TEXT DEFAULT 'nao_publicado'"),
             ("categoria_id",  "TEXT"),
+            # Metadados de catálogo para exportação multi-plataforma (Shopee/Amazon).
+            # Fonte única que substitui adivinhação por título/scraping.
+            ("meta_tipo_oferta",    "TEXT"),     # 'individual' | 'kit'
+            ("meta_conteudo",       "TEXT"),     # 'caca_palavras' | 'cognitivo' | 'misto'
+            ("meta_num_apostilas",  "INTEGER"),
+            ("meta_num_exercicios", "INTEGER"),
+            ("meta_composicao",     "TEXT"),
+            ("meta_fonte",          "TEXT"),     # 'banco' | 'groq'
+            ("meta_classificado_em","TEXT"),
         ])
 
         # Tabela: apostilas
@@ -679,6 +688,8 @@ def atualizar_anuncio(anuncio_id: int, **kwargs) -> None:
         "publicado_em", "titulo", "preco", "template_id",
         "variacao", "angulo", "kit_id", "apostila_id",
         "shopee_item_id", "shopee_status", "categoria_id",
+        "meta_tipo_oferta", "meta_conteudo", "meta_num_apostilas",
+        "meta_num_exercicios", "meta_composicao", "meta_fonte", "meta_classificado_em",
     }
     campos = {k: v for k, v in kwargs.items() if k in campos_permitidos}
     if not campos:
