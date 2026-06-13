@@ -70,6 +70,10 @@ def _descricao_rica(item: dict) -> str:
 # Perfil Shopee — reaproveita o patch XML do template (gerar_shopee_xlsx)
 # ---------------------------------------------------------------------------
 
+# Categoria Shopee usada (Livros e Revistas); os atributos do template já a cobrem.
+CATEGORIA_SHOPEE = "101566"
+
+
 def exportar_shopee(catalogo: list, output_path: str, limite: int = 0):
     import gerar_shopee_xlsx as gs
 
@@ -86,7 +90,7 @@ def exportar_shopee(catalogo: list, output_path: str, limite: int = 0):
         "ml_id": it["ml_id"], "imagem_path": it["imagem_path"],
     } for it in itens]
 
-    gs.gerar_de_produtos(produtos, output_path)
+    gs.gerar_de_produtos(produtos, output_path, categoria_id=CATEGORIA_SHOPEE)
     precos = sorted({p["preco"] for p in produtos})
     print(f"[shopee] {len(produtos)} produtos exportados -> {output_path}")
     print(f"[shopee] precos reais aplicados: {precos[:8]}{'...' if len(precos) > 8 else ''}")

@@ -408,11 +408,18 @@ def _gabarito_html(puzzles: list) -> str:
 
 
 def _back_html() -> str:
+    # "Editora CogniVita" explícito atende ao requisito da Amazon (página interna
+    # com nome da editora) para isenção de GTIN de livro.
     return """
 <div class="page back">
   <div class="back-logo">CogniVita</div>
   <div class="back-tag">Estimulação Cognitiva · Envelhecimento Saudável</div>
   <div class="back-domain">cognivita.com.br</div>
+  <div style="margin-top:14mm; font-size:10pt; color:#6B7E76; line-height:1.7;">
+    Editora CogniVita<br>
+    1ª edição · 2026 · Impresso no Brasil<br>
+    © CogniVita — Todos os direitos reservados
+  </div>
 </div>"""
 
 
