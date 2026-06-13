@@ -57,6 +57,29 @@ def upload(local_path: str, key: Optional[str] = None) -> str:
     return f"https://{R2_BUCKET}.{R2_ACCOUNT_ID}.r2.cloudflarestorage.com/{key}"
 
 
+def upload_video(local_path: str, key: Optional[str] = None) -> str:
+    """Upload de vídeo MP4 para R2. Retorna URL pública."""
+    if not _configured():
+        return local_path
+
+    if not local_path or not Path(local_path).exists():
+        return local_path
+
+    if key is None:
+        key = Path(local_path).name
+
+    _client().upload_file(
+        local_path,
+        R2_BUCKET,
+        key,
+        ExtraArgs={"ContentType": "video/mp4"},
+    )
+
+    if R2_PUBLIC_URL:
+        return f"{R2_PUBLIC_URL.rstrip('/')}/{key}"
+    return f"https://{R2_BUCKET}.{R2_ACCOUNT_ID}.r2.cloudflarestorage.com/{key}"
+
+
 def is_url(path: str) -> bool:
     return bool(path and path.startswith("http"))
 

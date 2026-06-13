@@ -1027,6 +1027,10 @@
             style="background:var(--surface);border:1px solid var(--border);color:var(--text);">
             💲 Sincronizar Preços ML
           </button>
+          <button class="btn" id="btn-excluir-inativos" onclick="excluirInativos(this)"
+            style="background:transparent;border:1px solid var(--error,#c0392b);color:var(--error,#c0392b);">
+            🗑 Excluir Inativos
+          </button>
         </div>
       </div>
       <div class="page-content">
@@ -2053,6 +2057,28 @@ async function importarDoML() {
   } finally {
     btn.disabled = false;
     btn.textContent = '↓ Importar do ML';
+  }
+}
+
+async function excluirInativos(btn) {
+  if (!confirm('Excluir todos os anúncios com status rascunho, erro e pausado? Esta ação não pode ser desfeita.')) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Excluindo…';
+  try {
+    const res = await apiFetch('/api/admin/anuncios/inativos', { method: 'DELETE' });
+    if (res.ok) {
+      const data = await res.json();
+      showToast(`${data.deletados} anúncios excluídos`, 'success');
+      await carregarAnuncios();
+    } else {
+      const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+      showToast(`Erro ${res.status}: ${err.detail || JSON.stringify(err)}`, 'error');
+    }
+  } catch (e) {
+    showToast(`Erro: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🗑 Excluir Inativos';
   }
 }
 
