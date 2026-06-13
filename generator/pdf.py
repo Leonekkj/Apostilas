@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright
 from generator.html_render import render_apostila_html
 
 
-def gerar_pdf(apostila_id: int, topico: dict, conteudo_json: str) -> str:
+def gerar_pdf(apostila_id: int, topico: dict, conteudo_json: str, capa_img: str = None) -> str:
     """
     Gera PDF da apostila e salva em output/pdfs/apostila_{apostila_id}.pdf.
 
@@ -23,11 +23,12 @@ def gerar_pdf(apostila_id: int, topico: dict, conteudo_json: str) -> str:
         apostila_id: ID único da apostila (usado no nome do arquivo).
         topico: dict com pelo menos {"nome": str}.
         conteudo_json: JSON string produzida por generator.content.gerar_conteudo().
+        capa_img: caminho local da foto do anúncio — capa do PDF = arte do ML.
 
     Returns:
         Caminho absoluto para o arquivo PDF gerado.
     """
-    html = render_apostila_html(topico, conteudo_json)
+    html = render_apostila_html(topico, conteudo_json, capa_img=capa_img)
 
     base_dir = Path(__file__).parent.parent
     output_dir = base_dir / "output" / "pdfs"

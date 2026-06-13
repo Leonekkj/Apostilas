@@ -311,14 +311,45 @@ def _pagina_puzzle(puzzle: dict, numero: int, produto_nome: str, dificuldade: st
     return flowables
 
 
-def gerar_pdf_caca_palavras(apostila_id: int, produto_nome: str, tema: str, dificuldade: str, num_puzzles: int) -> str:
-    """Gera puzzles e PDF completo. Retorna caminho absoluto do PDF."""
+def gerar_pdf_caca_palavras(apostila_id: int, produto_nome: str, tema: str, dificuldade: str, num_puzzles: int, capa_img: str = None) -> str:
+    """Gera puzzles e PDF completo. Retorna caminho absoluto do PDF.
+
+    Caminho principal: renderer premium HTML/CSS via Playwright
+    (generator/cp_html_render.py). Fallback: ReportLab clássico.
+    capa_img: caminho local da foto do anúncio (capa do PDF = arte do ML).
+    """
     puzzles = gerar_puzzles(tema, dificuldade, num_puzzles)
 
     output_dir = Path(__file__).parent / "output" / "pdfs"
     output_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = output_dir / f"apostila_{apostila_id}.pdf"
 
+    try:
+        from playwright.sync_api import sync_playwright
+        from generator.cp_html_render import render_cp_html
+
+        html = render_cp_html(produto_nome, tema, dificuldade, puzzles, capa_img=capa_img)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+            )
+            page = browser.new_page()
+            page.set_content(html, wait_until="networkidle")
+            page.pdf(
+                path=str(pdf_path),
+                format="A4",
+                print_background=True,
+                margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
+            )
+            browser.close()
+        return str(pdf_path.resolve())
+    except Exception as e:
+        print(f"[caca-palavras] renderer premium falhou ({e}); usando ReportLab")
+        return _gerar_pdf_reportlab(produto_nome, tema, dificuldade, puzzles, pdf_path)
+
+
+def _gerar_pdf_reportlab(produto_nome: str, tema: str, dificuldade: str, puzzles: list, pdf_path) -> str:
+    """Fallback: PDF clássico em ReportLab (sem Playwright)."""
     doc = SimpleDocTemplate(
         str(pdf_path),
         pagesize=A4,

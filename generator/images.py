@@ -285,6 +285,86 @@ def _render_cover_label(titulo: str, cor_escura: tuple, cor_acento: tuple,
     return label
 
 
+def _fit_font(draw, text: str, max_w: int, start: int, minimo: int = 24, regular: bool = False):
+    """Maior fonte (<= start) em que o texto cabe em max_w."""
+    sz = start
+    fnt = _font_regular(sz) if regular else _font(sz)
+    while _text_size(draw, text, fnt)[0] > max_w and sz > minimo:
+        sz -= 4
+        fnt = _font_regular(sz) if regular else _font(sz)
+    return fnt
+
+
+def gerar_capa_livro(titulo: str, variacao: int = 1, dest_path: str = None) -> str:
+    """Arte de capa do livro em A4 — o MESMO design da capa que aparece nos
+    livros das fotos dos anúncios (faixa COGNIVITA, título central, rodapé
+    APOSTILA FÍSICA), com tipografia proporcional para impressão.
+
+    Retorna o caminho do PNG gerado.
+    """
+    import tempfile
+
+    cor_escura_hex, cor_clara_hex, _acento = PALETAS.get(variacao or 1, PALETAS[1])
+    cor_escura = _hex(cor_escura_hex)
+    cor_clara = _hex(cor_clara_hex)
+    W, H = 1488, 2105  # A4 @ ~180dpi
+
+    img = Image.new("RGB", (W, H), cor_clara)
+    d = ImageDraw.Draw(img)
+
+    # Faixa superior — marca
+    strip_h = int(H * 0.105)
+    d.rectangle([(0, 0), (W, strip_h)], fill=cor_escura)
+    f_brand = _fit_font(d, "COGNIVITA", int(W * 0.64), start=int(strip_h * 0.62))
+    bw, bh = _text_size(d, "COGNIVITA", f_brand)
+    d.text(((W - bw) // 2, (strip_h - bh) // 2 - 6), "COGNIVITA", font=f_brand, fill=(255, 255, 255))
+
+    # Filete de acento sob a faixa
+    d.rectangle([(0, strip_h), (W, strip_h + 10)], fill=_blend(cor_escura, (255, 255, 255), 0.35))
+
+    # Rodapé
+    bot_h = int(H * 0.085)
+    d.rectangle([(0, H - bot_h), (W, H)], fill=cor_escura)
+    f_bot = _fit_font(d, "APOSTILA FÍSICA", int(W * 0.55), start=int(bot_h * 0.5), regular=True)
+    bw2, bh2 = _text_size(d, "APOSTILA FÍSICA", f_bot)
+    d.text(((W - bw2) // 2, H - bot_h + (bot_h - bh2) // 2 - 4),
+           "APOSTILA FÍSICA", font=f_bot, fill=(255, 255, 255))
+
+    # Título central — grande, em até 4 linhas ("—" quebra feio; vira "·")
+    titulo_capa = titulo.replace("—", "·").replace("--", "·")
+    area_y0, area_y1 = strip_h + 10, H - bot_h
+    pad = int(W * 0.09)
+    avail_w = W - pad * 2
+    sz = int(W * 0.115)
+    while sz > 48:
+        f_t = _font(sz)
+        lines = _wrap(titulo_capa.upper(), f_t, avail_w, d)
+        if len(lines) <= 4:
+            break
+        sz -= 8
+    lines = _wrap(titulo_capa.upper(), f_t, avail_w, d)
+    line_gap = int(sz * 0.28)
+    total_h = sum(_text_size(d, ln, f_t)[1] + line_gap for ln in lines) - line_gap
+    ty = area_y0 + ((area_y1 - area_y0) - total_h) // 2
+    for ln in lines:
+        lw, lh = _text_size(d, ln, f_t)
+        d.text(((W - lw) // 2, ty), ln, font=f_t, fill=cor_escura)
+        ty += lh + line_gap
+
+    # Linhas decorativas acima/abaixo do bloco de título
+    rule_w = int(W * 0.30)
+    by0 = area_y0 + ((area_y1 - area_y0) - total_h) // 2
+    d.rectangle([((W - rule_w) // 2, by0 - 70), ((W + rule_w) // 2, by0 - 62)], fill=cor_escura)
+    d.rectangle([((W - rule_w) // 2, ty + 62 - line_gap), ((W + rule_w) // 2, ty + 70 - line_gap)], fill=cor_escura)
+
+    if dest_path is None:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        dest_path = tmp.name
+        tmp.close()
+    img.save(dest_path, "PNG")
+    return dest_path
+
+
 def _paste_cover_label(base: Image.Image, titulo: str,
                         cor_escura: tuple, cor_acento: tuple,
                         variacao: int) -> Image.Image:
@@ -652,21 +732,17 @@ def _fetch_gemini_image(prompt: str) -> "Image.Image | None":
         return None
     try:
         from google import genai
-        from google.genai import types
         client = genai.Client(api_key=api_key)
-        response = client.models.generate_images(
-            model="imagen-3.0-generate-001",
-            prompt=prompt,
-            config=types.GenerateImagesConfig(
-                number_of_images=1,
-                aspect_ratio="1:1",
-                output_mime_type="image/png",
-            ),
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-image",
+            contents=prompt,
         )
-        img_bytes = response.generated_images[0].image.image_bytes
-        return Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        for part in response.candidates[0].content.parts:
+            if hasattr(part, "inline_data") and part.inline_data:
+                return Image.open(io.BytesIO(part.inline_data.data)).convert("RGB")
+        logger.warning("Gemini: nenhuma imagem retornada na resposta")
     except Exception as e:
-        logger.warning("Falha ao gerar imagem Gemini Imagen: %s", e)
+        logger.warning("Falha ao gerar imagem Gemini: %s", e)
     return None
 
 
@@ -746,11 +822,45 @@ def _fetch_qwen_image(prompt: str) -> "Image.Image | None":
     return None
 
 
+def _fetch_pixazo_image(prompt: str) -> "Image.Image | None":
+    import io, requests as _req
+    api_key = os.environ.get("PIXAZO_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        resp = _req.post(
+            "https://gateway.pixazo.ai/flux-1-schnell/v1/getData",
+            headers={
+                "Content-Type": "application/json",
+                "Cache-Control": "no-cache",
+                "Ocp-Apim-Subscription-Key": api_key,
+            },
+            json={"prompt": prompt, "num_steps": 4, "seed": 42, "height": 1024, "width": 1024},
+            timeout=120,
+        )
+        resp.raise_for_status()
+        img_url = resp.json().get("output")
+        if not img_url:
+            logger.warning("Pixazo: campo 'output' ausente na resposta")
+            return None
+        img_data = _req.get(img_url, timeout=60).content
+        return Image.open(io.BytesIO(img_data)).convert("RGB")
+    except Exception as e:
+        logger.warning("Falha ao gerar imagem Pixazo: %s", e)
+    return None
+
+
 def _fetch_ai_image(prompt: str) -> "tuple[Image.Image | None, str | None]":
-    """Retorna (imagem, fonte) — fonte é 'qwen', 'ideogram', 'replicate', 'fal', 'leonardo', 'gemini', 'hf', ou None."""
+    """Retorna (imagem, fonte) — fonte é 'gemini', 'qwen', 'pixazo', 'ideogram', 'replicate', 'fal', 'leonardo', 'hf', ou None."""
+    img = _fetch_gemini_image(prompt)
+    if img is not None:
+        return img, "gemini"
     img = _fetch_qwen_image(prompt)
     if img is not None:
         return img, "qwen"
+    img = _fetch_pixazo_image(prompt)
+    if img is not None:
+        return img, "pixazo"
     img = _fetch_ideogram_image(prompt)
     if img is not None:
         return img, "ideogram"
@@ -1239,17 +1349,11 @@ def _gerar_capa(
     if beneficios is None:
         beneficios = _BENEFICIOS_PADRAO
 
-    if variacao in (1, 2, 3):
-        if ai_image is not None:
-            ai_image.resize(SIZE, Image.LANCZOS).convert("RGB").save(str(path), "PNG")
-            return
-        else:
-            # Leonardo falhou: fundo verde sólido simples, sem overlay pesado com texto
-            img = Image.new("RGB", SIZE, color=(20, 70, 45))
-            img.save(str(path), "PNG")
-            return
+    if variacao in (1, 2, 3) and ai_image is not None:
+        ai_image.resize(SIZE, Image.LANCZOS).convert("RGB").save(str(path), "PNG")
+        return
 
-    # Fallback: layout Pillow puro (v4-v6)
+    # Fallback: layout Pillow puro (v4-v6, e v1-v3 quando AI indisponível)
     img = Image.new("RGB", SIZE, color=cor_clara)
     draw = ImageDraw.Draw(img)
     layout_fn = _LAYOUT_MAP.get(variacao, _layout_centrado)

@@ -693,8 +693,22 @@ def _contracapa_html() -> str:
 """
 
 
-def _cover_html(topico: dict, num_exercicios: int) -> str:
+def _cover_html(topico: dict, num_exercicios: int, capa_img=None) -> str:
     nome = _html_escape.escape(topico.get("nome", topico.get("name", "")))
+
+    # Arte do livro: a mesma capa que aparece nas fotos dos anúncios,
+    # ocupando a área útil da página (a arte já traz marca e título)
+    if capa_img:
+        from generator.cp_html_render import file_data_uri
+        foto = file_data_uri(capa_img)
+        if foto:
+            return f"""
+<div class="page cover">
+  <img src="{foto}" alt=""
+       style="display:block; width:170mm; height:250mm; object-fit:cover; margin:0 auto;">
+</div>
+"""
+
     return f"""
 <div class="page cover">
   <div class="cover-brand-bar">Estimulação Cognitiva para Idosos</div>
@@ -863,7 +877,7 @@ def _exercise_html(exercicio: dict) -> str:
 """
 
 
-def render_apostila_html(topico: dict, conteudo_json: str) -> str:
+def render_apostila_html(topico: dict, conteudo_json: str, capa_img=None) -> str:
     conteudo = json.loads(conteudo_json)
     exercicios = conteudo.get("exercicios", [])
     num_exercicios = conteudo.get("num_exercicios", len(exercicios))
@@ -871,7 +885,7 @@ def render_apostila_html(topico: dict, conteudo_json: str) -> str:
     fases = conteudo.get("fases", [])
     tem_premium = bool(fases)
 
-    cover = _cover_html(topico, num_exercicios)
+    cover = _cover_html(topico, num_exercicios, capa_img=capa_img)
     nome_escaped = _html_escape.escape(nome_topico)
 
     if tem_premium:
