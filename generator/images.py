@@ -850,23 +850,24 @@ def _fetch_pixazo_image(prompt: str) -> "Image.Image | None":
     return None
 
 
-def _fetch_together_qwen(prompt: str) -> "Image.Image | None":
-    """Qwen-Image-2.0-Pro via Together AI — melhor tipografia em português
-    (texto dentro da imagem correto, validado). Substitui o DashScope/wan expirado.
+def _fetch_together_image(prompt: str) -> "Image.Image | None":
+    """Gera imagem via Together AI — tipografia em português correta (texto na imagem).
 
+    Modelo via TOGETHER_IMAGE_MODEL (default Seedream-4.0, $0.03/img; bom em texto
+    e ~2.6x mais barato que Qwen-2.0-Pro). Substitui o DashScope/wan expirado.
     REST OpenAI-compatible: POST /v1/images/generations, resposta em b64_json.
-    Chave em TOGETHER_API_KEY. 1024x1024 = 1MP (4x mais barato que 2048).
     """
     import io, base64, requests as _req
     api_key = os.environ.get("TOGETHER_API_KEY", "")
     if not api_key:
         return None
+    model = os.environ.get("TOGETHER_IMAGE_MODEL", "ByteDance-Seed/Seedream-4.0")
     try:
         resp = _req.post(
             "https://api.together.xyz/v1/images/generations",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
-                "model": "Qwen/Qwen-Image-2.0-Pro",
+                "model": model,
                 "prompt": prompt,
                 "width": 1024,
                 "height": 1024,
@@ -894,9 +895,9 @@ def _fetch_together_qwen(prompt: str) -> "Image.Image | None":
 
 def _fetch_ai_image(prompt: str) -> "tuple[Image.Image | None, str | None]":
     """Retorna (imagem, fonte). Together/Qwen-Image primeiro (melhor tipografia)."""
-    img = _fetch_together_qwen(prompt)
+    img = _fetch_together_image(prompt)
     if img is not None:
-        return img, "together_qwen2pro"
+        return img, "together"
     img = _fetch_gemini_image(prompt)
     if img is not None:
         return img, "gemini"
