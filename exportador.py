@@ -38,6 +38,7 @@ def carregar_catalogo(somente_classificados: bool = True) -> list:
             FROM anuncios an
             WHERE an.status='publicado' AND an.ml_id IS NOT NULL
               AND an.imagem_path LIKE 'http%'
+              AND (an.shopee_status IS NULL OR an.shopee_status != 'nao_exportar')
               {filtro}
             ORDER BY an.id
         """)
