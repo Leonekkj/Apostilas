@@ -850,8 +850,53 @@ def _fetch_pixazo_image(prompt: str) -> "Image.Image | None":
     return None
 
 
+def _fetch_together_qwen(prompt: str) -> "Image.Image | None":
+    """Qwen-Image-2.0-Pro via Together AI — melhor tipografia em português
+    (texto dentro da imagem correto, validado). Substitui o DashScope/wan expirado.
+
+    REST OpenAI-compatible: POST /v1/images/generations, resposta em b64_json.
+    Chave em TOGETHER_API_KEY. 1024x1024 = 1MP (4x mais barato que 2048).
+    """
+    import io, base64, requests as _req
+    api_key = os.environ.get("TOGETHER_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        resp = _req.post(
+            "https://api.together.xyz/v1/images/generations",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": "Qwen/Qwen-Image-2.0-Pro",
+                "prompt": prompt,
+                "width": 1024,
+                "height": 1024,
+                "n": 1,
+                "response_format": "b64_json",
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        if not data:
+            logger.warning("Together qwen-image: resposta sem data")
+            return None
+        item = data[0]
+        if item.get("b64_json"):
+            return Image.open(io.BytesIO(base64.b64decode(item["b64_json"]))).convert("RGB")
+        if item.get("url"):
+            img_data = _req.get(item["url"], timeout=60).content
+            return Image.open(io.BytesIO(img_data)).convert("RGB")
+        logger.warning("Together qwen-image: nem b64_json nem url na resposta")
+    except Exception as e:
+        logger.warning("Falha ao gerar imagem Together/qwen-image: %s", e)
+    return None
+
+
 def _fetch_ai_image(prompt: str) -> "tuple[Image.Image | None, str | None]":
-    """Retorna (imagem, fonte) — fonte é 'gemini', 'qwen', 'pixazo', 'ideogram', 'replicate', 'fal', 'leonardo', 'hf', ou None."""
+    """Retorna (imagem, fonte). Together/Qwen-Image primeiro (melhor tipografia)."""
+    img = _fetch_together_qwen(prompt)
+    if img is not None:
+        return img, "together_qwen2pro"
     img = _fetch_gemini_image(prompt)
     if img is not None:
         return img, "gemini"
