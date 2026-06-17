@@ -145,9 +145,14 @@ def sincronizar_e_gerar_pdfs():
     logger.info(f"Apostilas vendidas sem PDF: {len(pendentes)}")
     for ap in pendentes:
         try:
-            # capa_img: dormente — quando houver arte de IA boa (assets/capas_ia/
-            # ou gerador melhor), plugar aqui. Sem ela, sai a capa premium CSS.
-            capa_img = None
+            # Arte de capa por tema (IA, cacheada). None → capa CSS de marca (fallback).
+            from generator import images as _img
+            tema = ap.get("tema") or "geral"
+            try:
+                capa_img = _img.gerar_arte_capa_tema(tema)
+            except Exception as e:
+                logger.warning("Falha ao resolver arte de capa (tema=%s): %s", tema, e)
+                capa_img = None
 
             if ap.get("dificuldade"):
                 # Caça-palavras: gerador próprio (puzzles), NÃO o genérico de exercícios
