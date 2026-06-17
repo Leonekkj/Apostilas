@@ -1775,3 +1775,64 @@ def gerar_capa_produto(
         paths.append(str(fname))
 
     return paths
+
+
+# ---------------------------------------------------------------------------
+# Arte de capa por tema (cena editorial SEM texto — overlay de marca é via CSS)
+# ---------------------------------------------------------------------------
+
+_CAPAS_IA_DIR = Path(__file__).parent.parent / "assets" / "capas_ia"
+
+THEME_COVER_PROMPTS = {
+    "geral": "Vertical portrait illustration for a premium puzzle book cover for seniors, soft warm editorial style. A cozy reading corner: comfortable armchair, warm afternoon light through a window, reading glasses and a pencil resting on an open activity book, a cup of tea. Muted palette of deep forest green, cream and soft gold. Calm, sophisticated, welcoming mood. The lower third of the image gradually darkens to deep green, clean and uncluttered for text overlay. Absolutely no text, no letters, no words anywhere in the image. 3:4 aspect ratio.",
+    "futebol": "Vertical portrait illustration for a premium puzzle book cover, soft warm editorial style for seniors. A nostalgic Brazilian football scene: vintage leather football on fresh grass, stadium silhouette in soft golden evening light, gentle bokeh. Muted palette of deep forest green, cream and warm gold. Calm nostalgic mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no text, no letters, no numbers anywhere. 3:4 aspect ratio.",
+    "animais": "Vertical portrait illustration for a premium puzzle book cover, soft warm editorial style for seniors. Gentle watercolor-style animals: a songbird on a branch, a sleeping cat, a friendly golden retriever, soft botanical leaves around them. Muted palette of deep forest green, cream and soft terracotta. Calm, tender mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no text or letters anywhere. 3:4 aspect ratio.",
+    "brasil": "Vertical portrait illustration for a premium puzzle book cover, soft warm editorial style for seniors. Affectionate Brazilian landscape collage: colonial town with colorful facades, palm trees, gentle mountains at golden hour, a flying flock of birds. Muted palette of deep forest green, cream, warm yellow and soft blue. Calm nostalgic mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no text, no letters anywhere. 3:4 aspect ratio.",
+    "culinaria": "Vertical portrait illustration for a premium puzzle book cover, soft warm editorial style for seniors. A warm Brazilian kitchen still life: clay pot, fresh bread, coffee in an enamel mug, herbs, wooden spoon, soft morning light. Muted palette of deep forest green, cream and terracotta. Cozy homely mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no text or letters anywhere. 3:4 aspect ratio.",
+    "musica": "Vertical portrait illustration for a premium puzzle book cover, soft warm editorial style for seniors. A nostalgic music corner: acoustic guitar leaning on a wooden chair, old radio, vinyl record, soft floating musical notes, warm window light. Muted palette of deep forest green, cream and soft gold. Calm nostalgic mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no text or letters anywhere. 3:4 aspect ratio.",
+    "natureza": "Vertical portrait illustration for a premium puzzle book cover, soft warm editorial style for seniors. A serene garden scene: blooming ipê tree, butterflies, a small wooden bench under soft dappled sunlight, gentle stream, lush green leaves. Muted palette of deep forest green, cream and soft yellow. Peaceful mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no text or letters anywhere. 3:4 aspect ratio.",
+}
+
+def _capa_existente(tema: str) -> "str | None":
+    for ext in (".png", ".jpg", ".jpeg", ".webp"):
+        p = _CAPAS_IA_DIR / f"{tema}{ext}"
+        if p.exists():
+            return str(p)
+    return None
+
+def gerar_arte_capa_tema(tema: str) -> "str | None":
+    """Retorna o caminho da arte de capa (cena editorial SEM texto) do tema.
+    Cacheia em assets/capas_ia/{tema}.png e reusa. Gera via _fetch_ai_image.
+    Retorna None se não houver prompt do tema ou se a geração falhar."""
+    tema = (tema or "geral").strip().lower()
+    if tema not in THEME_COVER_PROMPTS:
+        tema = "geral"
+
+    cached = _capa_existente(tema)
+    if cached:
+        return cached
+
+    prompt = THEME_COVER_PROMPTS[tema]
+    img, fonte = _fetch_ai_image(prompt)
+    if img is None:
+        logger.warning("Arte de capa tema '%s': geração IA falhou", tema)
+        return None
+
+    # recorta para retrato 3:4 (centralizado) se vier quadrada
+    w, h = img.size
+    alvo = 3 / 4
+    if abs((w / h) - alvo) > 0.02:
+        nova_h = h
+        nova_w = int(h * alvo)
+        if nova_w > w:
+            nova_w = w
+            nova_h = int(w / alvo)
+        left = (w - nova_w) // 2
+        top = (h - nova_h) // 2
+        img = img.crop((left, top, left + nova_w, top + nova_h))
+
+    _CAPAS_IA_DIR.mkdir(parents=True, exist_ok=True)
+    dest = _CAPAS_IA_DIR / f"{tema}.png"
+    img.save(dest, "PNG")
+    logger.info("Arte de capa tema '%s' gerada via %s → %s", tema, fonte, dest)
+    return str(dest)
