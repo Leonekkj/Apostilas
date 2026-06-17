@@ -292,10 +292,18 @@ def _exercise_html(exercicio: dict) -> str:
     descricao = _html_escape.escape(str(exercicio.get("descricao", "")))
     instrucoes = exercicio.get("instrucoes", [])
     tipo = exercicio.get("tipo", "texto")
+    categoria = exercicio.get("categoria")
     dados = exercicio.get("dados_visuais") or {}
     espaco = exercicio.get("espaco_resposta", "linha")
 
-    header = f'<div class="exercise-header">EXERCÍCIO {numero} — {titulo.upper()}</div>'
+    icone = _pdf_assets.icon_for(categoria, tipo)
+    cat_label = _html_escape.escape(str(categoria)) if categoria else ""
+    cat_html = f'<div class="ex-cat">{cat_label}</div>' if cat_label else ""
+    header = (
+        f'{cat_html}'
+        f'<div class="ex-header"><span class="ex-ic">{icone}</span>'
+        f'<span class="ex-title">Exercício {numero} · {titulo}</span></div>'
+    )
     desc_html = f'<p class="exercise-desc">{descricao}</p>' if descricao else ""
 
     steps_html = ""
@@ -349,7 +357,9 @@ def render_apostila_html(topico: dict, conteudo_json: str, capa_img=None) -> str
             conteudo_interno += _fase_abertura_html(fase)
             numeros = fase.get("exercicios_numeros", [])
             fase_exercicios = [ex_por_numero[n] for n in numeros if n in ex_por_numero]
-            exercises_html = "".join(_exercise_html(e) for e in fase_exercicios)
+            exercises_html = _pdf_assets.divider_svg().join(
+                _exercise_html(e) for e in fase_exercicios
+            )
             conteudo_interno += f'<div class="exercises-block">{exercises_html}</div>'
 
         rotina = _rotina_semanal_html(conteudo.get("rotina_semanal", {}))
@@ -359,7 +369,9 @@ def render_apostila_html(topico: dict, conteudo_json: str, capa_img=None) -> str
         body = f"{cover}{apresentacao}{indice}{conteudo_interno}{rotina}{gabarito}{contracapa}"
     else:
         instructions = _instructions_html(nome_topico, num_exercicios)
-        exercises_html = "".join(_exercise_html(e) for e in exercicios)
+        exercises_html = _pdf_assets.divider_svg().join(
+            _exercise_html(e) for e in exercicios
+        )
         body = f"{cover}{instructions}<div class=\"exercises-block\">{exercises_html}</div>"
 
     return f"""<!DOCTYPE html>
