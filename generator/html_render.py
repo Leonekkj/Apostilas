@@ -153,9 +153,16 @@ def _cover_html(topico: dict, num_exercicios: int, capa_img=None) -> str:
         foto = file_data_uri(capa_img)
         if foto:
             return f"""
-<div class="page cover">
-  <img src="{foto}" alt=""
-       style="display:block; width:170mm; height:250mm; object-fit:cover; margin:0 auto;">
+<div class="page bleed cover">
+  <img class="cover-art" src="{foto}" alt="">
+  <div class="cover-grad"></div>
+  <div class="cover-top">Estimulação Cognitiva 60+</div>
+  <div class="cover-bottom">
+    <div class="cover-brand">COGNIVITA</div>
+    <hr class="cover-rule">
+    <div class="cover-title">Apostila de {nome}</div>
+    <div class="cover-seal">{num_exercicios} atividades · 60+</div>
+  </div>
 </div>
 """
 
