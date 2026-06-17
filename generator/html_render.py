@@ -154,14 +154,23 @@ def _cover_html(topico: dict, num_exercicios: int, capa_img=None) -> str:
         if foto:
             return f"""
 <div class="page bleed cover">
-  <img class="cover-art" src="{foto}" alt="">
-  <div class="cover-grad"></div>
-  <div class="cover-top">Estimulação Cognitiva 60+</div>
-  <div class="cover-bottom">
-    <div class="cover-brand">COGNIVITA</div>
-    <hr class="cover-rule">
-    <div class="cover-title">Apostila de {nome}</div>
-    <div class="cover-seal">{num_exercicios} atividades · 60+</div>
+  <img class="ac-art" src="{foto}" alt="">
+  <div class="ac-shade"></div>
+  <div class="ac-brand">
+    <div class="ac-brand-name">COGNIVITA</div>
+    <div class="ac-brand-tag">Estimulação Cognitiva · 60+</div>
+  </div>
+  <div class="ac-content">
+    <div class="ac-kicker">Coleção Bem Envelhecer</div>
+    <div class="ac-title">Apostila de {nome}</div>
+    <div class="ac-sub">Para idosos 60+</div>
+    <div class="ac-chips">
+      <span class="chip solid">{num_exercicios} atividades</span>
+      <span class="chip">Letra grande</span>
+      <span class="chip">Material físico</span>
+    </div>
+    <hr class="ac-rule">
+    <div class="ac-domain">cognivita.com.br</div>
   </div>
 </div>
 """

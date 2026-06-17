@@ -630,15 +630,30 @@ body {{
   color: {C_MUTED};
 }}
 
-/* === CAPA com arte IA + overlay de marca === */
-.cover-art {{ position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }}
-.cover-grad {{ position: absolute; left: 0; right: 0; bottom: 0; height: 55%;
-  background: linear-gradient(180deg, rgba({C_DARK_RGB},0) 0%, rgba({C_DARK_RGB},0.85) 78%, rgba({C_DARK_RGB},0.95) 100%); }}
-.cover-top {{ position: absolute; top: 0; left: 0; right: 0; text-align: center; color: {C_CREAM};
-  font-size: 10pt; letter-spacing: 0.28em; text-transform: uppercase; padding: 10mm 8mm 0; }}
-.cover-bottom {{ position: absolute; left: 0; right: 0; bottom: 0; text-align: center; color: {C_CREAM}; padding: 0 14mm 16mm; }}
-.cover-brand {{ font-family: 'Cormorant Garamond', serif; font-size: 16pt; letter-spacing: 0.12em; }}
-.cover-rule {{ width: 18mm; height: 1px; background: {C_GOLD}; margin: 3mm auto; border: none; }}
-.cover-title {{ font-family: 'Cormorant Garamond', serif; font-size: 30pt; line-height: 1.1; }}
-.cover-seal {{ font-size: 10pt; opacity: 0.9; margin-top: 4mm; }}
+/* === CAPA: marca dominante; arte IA é fundo escurecido (não o protagonista) === */
+.page.bleed.cover {{ background: {C_DARK}; color: {C_CREAM}; }}
+.ac-art {{ position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }}
+.ac-shade {{ position: absolute; inset: 0; background: linear-gradient(180deg,
+  rgba({C_DARK_RGB},0.66) 0%, rgba({C_DARK_RGB},0.45) 30%, rgba({C_DARK_RGB},0.58) 54%,
+  rgba({C_DARK_RGB},0.93) 78%, rgba({C_DARK_RGB},0.98) 100%); }}
+.ac-brand {{ position: absolute; top: 0; left: 0; right: 0; text-align: center; padding: 16mm 10mm 0; }}
+.ac-brand-name {{ font-family: 'Cormorant Garamond', serif; font-weight: 600;
+  font-size: 30pt; letter-spacing: 0.14em; color: {C_CREAM}; line-height: 1.05; }}
+.ac-brand-tag {{ font-size: 9pt; letter-spacing: 0.3em; text-transform: uppercase;
+  color: {C_LIGHT_GREEN}; margin-top: 3mm; }}
+.ac-content {{ position: absolute; left: 0; right: 0; bottom: 0; padding: 0 16mm 16mm;
+  text-align: center; color: {C_CREAM}; }}
+.ac-kicker {{ font-size: 10pt; letter-spacing: 0.24em; text-transform: uppercase;
+  color: {C_LIGHT_GREEN}; margin-bottom: 4mm; }}
+.ac-title {{ font-family: 'Cormorant Garamond', serif; font-weight: 600;
+  font-size: 40pt; line-height: 1.04; margin-bottom: 4mm; }}
+.ac-sub {{ font-family: 'Cormorant Garamond', serif; font-style: italic;
+  font-size: 17pt; color: rgba(255,255,255,0.92); margin-bottom: 8mm; }}
+.ac-chips {{ display: flex; justify-content: center; gap: 4mm; margin-bottom: 8mm; flex-wrap: wrap; }}
+.ac-chips .chip {{ border: 1px solid rgba(255,255,255,0.45); border-radius: 99px;
+  padding: 2mm 5mm; font-size: 9.5pt; letter-spacing: 0.06em; text-transform: uppercase; color: {C_CREAM}; }}
+.ac-chips .chip.solid {{ background: {C_GREEN}; border-color: {C_GREEN}; }}
+.ac-rule {{ width: 36mm; height: 1px; background: {C_GOLD}; border: none; margin: 0 auto 4mm; }}
+.ac-domain {{ font-family: 'Cormorant Garamond', serif; font-style: italic;
+  font-size: 12pt; color: rgba(255,255,255,0.85); }}
 """

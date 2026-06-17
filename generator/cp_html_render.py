@@ -266,14 +266,13 @@ def _cover_html(produto_nome: str, tema: str, dificuldade: str, n: int, capa_img
     nivel = _NIVEL_LABEL.get(dificuldade, dificuldade.title())
     tema_label = tema.replace("_", " ").title()
 
-    # Arte do livro (prioridade máxima): a mesma capa que aparece nas fotos
-    # dos anúncios, em página inteira — a arte já traz marca, título e rodapé
+    # Arte de IA entra como FUNDO escurecido do layout de marca (a marca domina,
+    # não a foto). capa_img (arte do tema gerada) tem prioridade sobre a do tema.
+    art = None
     if capa_img:
-        foto = file_data_uri(capa_img)
-        if foto:
-            return f'<div class="page cover"><img class="cover-art-full" src="{foto}" alt=""></div>'
-
-    art = _capa_data_uri(tema)
+        art = file_data_uri(capa_img)
+    if not art:
+        art = _capa_data_uri(tema)
 
     if art:
         fundo = f'<img class="cover-art" src="{art}" alt="">'
