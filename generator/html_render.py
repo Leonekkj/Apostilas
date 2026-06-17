@@ -167,7 +167,7 @@ def _cover_html(topico: dict, num_exercicios: int, capa_img=None) -> str:
 """
 
     return f"""
-<div class="page cover">
+<div class="page bleed cover">
   <div class="cover-brand-bar">Estimulação Cognitiva para Idosos</div>
   <div class="cover-logo">Cognivita</div>
   <hr class="cover-rule">
@@ -389,6 +389,7 @@ def render_apostila_html(topico: dict, conteudo_json: str, capa_img=None) -> str
   <style>{_css()}</style>
 </head>
 <body>
+  <div class="sheet-frame"></div>
   {body}
 </body>
 </html>
