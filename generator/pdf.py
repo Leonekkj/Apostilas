@@ -43,7 +43,7 @@ def gerar_pdf(apostila_id: int, topico: dict, conteudo_json: str, capa_img: str 
             path=str(pdf_path),
             format="A4",
             print_background=True,
-            margin={"top": "18mm", "right": "20mm", "bottom": "20mm", "left": "20mm"},
+            margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
         )
         browser.close()
 
