@@ -132,15 +132,6 @@ body {{
   min-height: 297mm;
 }}
 
-/* conteúdo fluido de exercícios (NÃO é .page): mantém padding lateral
-   que persiste através de quebras de página no Chromium (left/right
-   persistem; top/bottom não). 18mm afasta da keyline (10mm) com folga. */
-.exercises-block {{
-  position: relative;
-  z-index: 1;
-  padding: 14mm 18mm 0 18mm;
-}}
-
 /* páginas que sangram fundo até a borda (capa/contracapa): sem moldura.
    z-index alto + fundo sólido full-bleed cobrem a moldura fixa. */
 .page.bleed {{

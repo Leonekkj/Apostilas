@@ -342,6 +342,42 @@ def _exercise_html(exercicio: dict) -> str:
 """
 
 
+def _exercise_weight(ex: dict) -> int:
+    """Peso de altura de um exercício para a paginação (orçamento 2 por folha).
+    Exercícios "altos" (tabela, ligar colunas, caixa/lista de resposta) ocupam
+    a folha sozinhos; os demais dividem a folha em dois."""
+    tipo = ex.get("tipo", "texto")
+    espaco = ex.get("espaco_resposta", "linha")
+    if tipo == "tabela" or espaco == "quadrado":
+        return 2
+    return 1
+
+
+def _exercises_pages_html(exercicios: list) -> str:
+    """Agrupa exercícios em folhas (.page) próprias, evitando que o conteúdo
+    fluido transborde para uma folha sem moldura. Cada folha respeita a moldura
+    fixa porque o .page tem padding que o mantém dentro da keyline."""
+    if not exercicios:
+        return ""
+    BUDGET = 2
+    pages, current, load = [], [], 0
+    for ex in exercicios:
+        w = _exercise_weight(ex)
+        if current and load + w > BUDGET:
+            pages.append(current)
+            current, load = [], 0
+        current.append(ex)
+        load += w
+    if current:
+        pages.append(current)
+
+    html = ""
+    for group in pages:
+        inner = _pdf_assets.divider_svg().join(_exercise_html(e) for e in group)
+        html += f'<div class="page exercises-page">{inner}</div>'
+    return html
+
+
 def render_apostila_html(topico: dict, conteudo_json: str, capa_img=None) -> str:
     conteudo = json.loads(conteudo_json)
     exercicios = conteudo.get("exercicios", [])
@@ -364,10 +400,7 @@ def render_apostila_html(topico: dict, conteudo_json: str, capa_img=None) -> str
             conteudo_interno += _fase_abertura_html(fase)
             numeros = fase.get("exercicios_numeros", [])
             fase_exercicios = [ex_por_numero[n] for n in numeros if n in ex_por_numero]
-            exercises_html = _pdf_assets.divider_svg().join(
-                _exercise_html(e) for e in fase_exercicios
-            )
-            conteudo_interno += f'<div class="exercises-block">{exercises_html}</div>'
+            conteudo_interno += _exercises_pages_html(fase_exercicios)
 
         rotina = _rotina_semanal_html(conteudo.get("rotina_semanal", {}))
         gabarito = _gabarito_html(conteudo.get("gabarito", []))
@@ -376,10 +409,7 @@ def render_apostila_html(topico: dict, conteudo_json: str, capa_img=None) -> str
         body = f"{cover}{apresentacao}{indice}{conteudo_interno}{rotina}{gabarito}{contracapa}"
     else:
         instructions = _instructions_html(nome_topico, num_exercicios)
-        exercises_html = _pdf_assets.divider_svg().join(
-            _exercise_html(e) for e in exercicios
-        )
-        body = f"{cover}{instructions}<div class=\"exercises-block\">{exercises_html}</div>"
+        body = f"{cover}{instructions}{_exercises_pages_html(exercicios)}"
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
