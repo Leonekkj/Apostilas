@@ -342,32 +342,55 @@ def _exercise_html(exercicio: dict) -> str:
 """
 
 
-def _exercise_weight(ex: dict) -> int:
-    """Peso de altura de um exercício para a paginação (orçamento 2 por folha).
-    Exercícios "altos" (tabela, ligar colunas, caixa/lista de resposta) ocupam
-    a folha sozinhos; os demais dividem a folha em dois."""
+def _exercise_height_mm(ex: dict) -> int:
+    """Estimativa de altura (mm) de um exercício, para empacotar o máximo de
+    exercícios por folha sem transbordar. Conservadora o suficiente para caber."""
     tipo = ex.get("tipo", "texto")
     espaco = ex.get("espaco_resposta", "linha")
-    if tipo == "tabela" or espaco == "quadrado":
-        return 2
-    return 1
+    dados = ex.get("dados_visuais") or {}
+    h = 42  # cabeçalho + descrição (~2 linhas) + "Como fazer" (~2 passos)
+    if tipo == "tabela":
+        linhas = dados.get("linhas", 5)
+        if isinstance(linhas, list):
+            linhas = linhas[0] if linhas else 5
+        h += 12 + int(linhas) * 9
+    elif tipo == "ligar":
+        n = max(len(dados.get("esquerda", [])), len(dados.get("direita", [])), 1)
+        h += 10 + n * 9
+    elif tipo == "completar":
+        n = len(dados.get("frases", [])) or 1
+        h += n * 13 + 14
+    elif tipo == "sequencia":
+        h += 28
+    else:  # texto e afins → depende do espaço de resposta
+        if espaco == "quadrado":
+            h += 58
+        elif espaco == "lista":
+            h += 46
+        else:  # linha (5 linhas)
+            h += 40
+    return h
 
 
 def _exercises_pages_html(exercicios: list) -> str:
-    """Agrupa exercícios em folhas (.page) próprias, evitando que o conteúdo
-    fluido transborde para uma folha sem moldura. Cada folha respeita a moldura
-    fixa porque o .page tem padding que o mantém dentro da keyline."""
+    """Empacota exercícios em folhas (.page) próprias preenchendo cada folha o
+    máximo possível (orçamento de altura), evitando que conteúdo fluido transborde
+    para uma folha sem moldura. Cada .page respeita a moldura porque o padding o
+    mantém dentro da keyline."""
     if not exercicios:
         return ""
-    BUDGET = 2
-    pages, current, load = [], [], 0
+    PAGE_MM = 245  # área útil aproximada dentro da moldura/margens
+    DIVIDER_MM = 12
+    pages, current, used = [], [], 0
     for ex in exercicios:
-        w = _exercise_weight(ex)
-        if current and load + w > BUDGET:
+        eh = _exercise_height_mm(ex)
+        add = eh + (DIVIDER_MM if current else 0)
+        if current and used + add > PAGE_MM:
             pages.append(current)
-            current, load = [], 0
+            current, used = [], 0
+            add = eh
         current.append(ex)
-        load += w
+        used += add
     if current:
         pages.append(current)
 

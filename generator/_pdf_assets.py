@@ -110,14 +110,6 @@ body {{
   top: 10mm; left: 10mm; right: 10mm; bottom: 10mm;
   border: 0.75pt solid {C_GREEN};
 }}
-/* filete dourado de 2mm no topo */
-.sheet-frame::after {{
-  content: "";
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 2mm;
-  background: {C_GOLD};
-}}
 
 /* cada .page é uma folha; o fundo creme vai até a borda física.
    z-index acima da moldura fixa, mas o fundo creme é translúcido só
