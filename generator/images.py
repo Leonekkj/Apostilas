@@ -91,12 +91,12 @@ def _build_ai_prompts(titulo: str, num_exercicios: int = 60, serie_romano: str =
     cover_desc_v2 = (
         f"brand name COGNIVITA in small bold dark green at top, large centered title \"{titulo}\" in dark forest green, "
         f"{'smaller text \"Volume ' + serie_romano + '\" below title in sage green italic, ' if serie_romano else ''}"
-        f"rounded badge reading \"{ex}\" at bottom. Gold spiral binding on left. "
+        f"rounded badge reading \"{ex}\" at bottom. Prominent black wire-o plastic spiral binding with clearly visible coils on the left edge."
     )
     cover_desc_v3 = (
         f"brand name COGNIVITA in small bold dark green at top, large title \"{titulo}\" centered in dark forest green, "
         f"{'smaller text \"Volume ' + serie_romano + '\" below in sage green, ' if serie_romano else ''}"
-        f"rounded badge \"{ex}\" at bottom. Gold spiral binding on left. "
+        f"rounded badge \"{ex}\" at bottom. Prominent black wire-o plastic spiral binding with clearly visible coils on the left edge."
     )
 
     return {
@@ -106,7 +106,7 @@ def _build_ai_prompts(titulo: str, num_exercicios: int = 60, serie_romano: str =
             f"Hero: one thick closed spiral-bound workbook standing upright centered on a {ambiente_v1}, cover fully sharp and in focus. "
             f"Cover design: warm cream background with subtle watercolor organic shapes in dark forest green at top and bottom edges. "
             f"{cover_desc_v1}"
-            f"Warm gold spiral binding on left side, thick pages visible on right side showing book depth. "
+            f"Prominent black wire-o plastic spiral binding with clearly visible coils running down the entire left edge, thick pages visible on right side showing book depth. "
             f"Gentle warm shadow, airy premium editorial mood, ultra sharp cover detail."
         ),
         # v2 — Lifestyle: idosa usando o caderno
