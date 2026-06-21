@@ -1148,7 +1148,7 @@ def _layout_split(img: Image.Image, draw: ImageDraw.ImageDraw,
 
     # Especificações rápidas
     font_spec = _font_regular(28)
-    specs = ["Tamanho A4  ·  Impressão P&B", "Fonte Ampliada para Idosos", "Apostila Física Encadernada"]
+    specs = ["Tamanho A4  ·  Impressão Colorida", "Fonte Ampliada para Idosos", "Apostila Física Encadernada"]
     for sp in specs:
         draw.text((rx0, ty), sp, font=font_spec, fill=_blend(cor_escura, (255, 255, 255), 0.3))
         ty += 42
@@ -1672,8 +1672,13 @@ def gerar_capas_kit(
     kit_nome: str,
     apostilas: list[dict],
     variacao: int = None,
+    exigir_ia: bool = False,
 ) -> list[str]:
-    """Gera capas para um kit de apostilas."""
+    """Gera capas para um kit de apostilas.
+
+    exigir_ia=True: se a capa v1 NÃO vier da IA (crédito/erro → cairia no Pillow feio),
+    aborta e retorna [] — usado na geração automática para nunca publicar capa Pillow.
+    """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     total_exercicios = sum(a.get("num_exercicios", 0) for a in apostilas)
@@ -1691,8 +1696,19 @@ def gerar_capas_kit(
     ]
     prompts = _build_kit_ai_prompts(apostilas_info, total_exercicios)
     ai_images = _fetch_ai_images_for_variacoes(variacoes, prompts)
-    paths = []
 
+    # Proteção anti-Pillow: na geração automática, só seguimos se a capa principal
+    # (v1) veio da IA. Sem isso, um crédito/erro na IA publicaria capa Pillow feia.
+    v1_precisa = (variacao is None) or (variacao == 1)
+    v1_existe = (OUTPUT_DIR / f"kit_{kit_id}_v1.png").exists()
+    if exigir_ia and v1_precisa and ai_images.get(1) is None and not v1_existe:
+        logger.warning("Kit %s: capa v1 não veio da IA (crédito/erro) — abortando para não publicar Pillow", kit_id)
+        for entry in ai_images.values():
+            try: entry[0].close()
+            except Exception: pass
+        return []
+
+    paths = []
     for v in variacoes:
         fname = OUTPUT_DIR / f"kit_{kit_id}_v{v}.png"
         # Reutiliza imagem já gerada no disco — evita chamada AI desnecessária

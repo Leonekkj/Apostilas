@@ -236,8 +236,14 @@ def gerar_kits_automaticos():
                     titulos = gen_content.gerar_titulos_kit_ml(nome, apostilas_objs, total_exercicios)
                     descricao = gen_content.gerar_descricao_kit_ml(nome, apostilas_objs, total_exercicios)
 
-                    # Gera v1/v2/v3 uma única vez por kit — reutiliza para os 6 anúncios
-                    all_image_paths = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs)
+                    # Gera v1/v2/v3 uma única vez por kit — reutiliza para os 6 anúncios.
+                    # exigir_ia=True: se a IA de imagem falhar (crédito/erro), aborta o kit
+                    # em vez de publicar capa Pillow feia.
+                    all_image_paths = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs, exigir_ia=True)
+                    if not all_image_paths:
+                        logger.warning("Kit '%s' pulado: IA de imagem indisponível (não publica capa Pillow)", nome)
+                        kits_pulados += 1
+                        continue
 
                     novos_anuncio_ids = []
                     for i, title in enumerate(titulos, start=1):
