@@ -60,3 +60,34 @@ def buscar_pedidos_pagos() -> list[dict]:
             break
 
     return pedidos
+
+
+def custo_frete_pedido(pedido: dict) -> float:
+    """Custo de frete pago pelo VENDEDOR (frete grátis = custo nosso).
+
+    Best-effort: tenta o recurso /shipments/{id}. Se não houver shipping ou a
+    chamada falhar, retorna 0.0 — nunca levanta exceção (não pode travar a sync).
+    """
+    try:
+        shipping = pedido.get("shipping") or {}
+        shipment_id = shipping.get("id")
+        if not shipment_id:
+            return 0.0
+        token = auth.get_valid_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        r = requests.get(
+            f"{ML_API_BASE}/shipments/{shipment_id}/costs",
+            headers=headers, timeout=15,
+        )
+        if r.status_code != 200:
+            return 0.0
+        data = r.json()
+        # 'senders' carrega o custo do vendedor; estrutura varia por conta.
+        senders = data.get("senders") or {}
+        custo = senders.get("cost")
+        if custo is None:
+            gross = data.get("gross_amount")
+            custo = gross if gross is not None else 0.0
+        return round(float(custo or 0.0), 2)
+    except Exception:
+        return 0.0

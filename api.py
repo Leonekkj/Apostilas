@@ -1105,10 +1105,15 @@ async def sincronizar_vendas(auth=Depends(_require_auth)):
                 continue
             comprador_nickname = pedido.get("buyer", {}).get("nickname", "")
             data_venda = pedido.get("date_created", "")
-            for item in pedido.get("order_items", []):
+            frete_pedido = ml_orders.custo_frete_pedido(pedido)
+            itens = pedido.get("order_items", [])
+            for idx, item in enumerate(itens):
                 ml_item_id = item.get("item", {}).get("id", "")
                 valor = float(item.get("unit_price", 0))
                 quantidade = int(item.get("quantity", 1))
+                comissao = float(item.get("sale_fee", 0) or 0)
+                # frete é do pedido inteiro: atribui ao 1º item, 0 nos demais
+                frete = frete_pedido if idx == 0 else 0.0
                 anuncio_id = database.buscar_anuncio_id_por_ml_id(ml_item_id)
                 database.salvar_venda(
                     ml_order_id=ml_order_id,
@@ -1117,6 +1122,8 @@ async def sincronizar_vendas(auth=Depends(_require_auth)):
                     valor=valor,
                     quantidade=quantidade,
                     data_venda=data_venda,
+                    comissao_ml=comissao,
+                    frete_custo=frete,
                 )
                 importados += 1
         return importados
