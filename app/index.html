@@ -2658,7 +2658,7 @@ async function finView(modo) {
     if (modo === 'produto') {
       const linhas = await finGet(`/api/admin/financeiro/por-produto?inicio=${inicio}&fim=${fim}`);
       el.innerHTML = '<table><thead><tr><th>Produto</th><th>Faturamento</th><th>Tarifas</th><th>Margem Contrib.</th><th>Rateio</th><th>Lucro Líquido Est.</th></tr></thead><tbody>' +
-        linhas.map(l => `<tr><td>${l.produto_nome}</td><td>R$ ${l.faturamento.toFixed(2)}</td><td>R$ ${(l.faturamento - l.margem_contribuicao).toFixed(2)}</td><td>R$ ${l.margem_contribuicao.toFixed(2)}</td><td>R$ ${l.rateio.toFixed(2)}</td><td>R$ ${l.lucro_liquido_estimado.toFixed(2)}</td></tr>`).join('') + '</tbody></table>';
+        linhas.map(l => `<tr><td>${l.produto_nome}</td><td>R$ ${l.faturamento.toFixed(2)}</td><td>R$ ${l.tarifas.toFixed(2)}</td><td>R$ ${l.margem_contribuicao.toFixed(2)}</td><td>R$ ${l.rateio.toFixed(2)}</td><td>R$ ${l.lucro_liquido_estimado.toFixed(2)}</td></tr>`).join('') + '</tbody></table>';
     } else if (modo === 'venda') {
       const linhas = await finGet(`/api/admin/financeiro/por-venda?inicio=${inicio}&fim=${fim}`);
       el.innerHTML = '<table><thead><tr><th>Data</th><th>Produto</th><th>Quantidade</th><th>Valor Unit.</th><th>Total</th><th>Comissão ML</th><th>Frete</th><th>Margem</th></tr></thead><tbody>' +
@@ -2696,7 +2696,7 @@ async function finDeletar(id) {
   try {
     await finDelete(`/api/admin/despesas/${id}`);
     showToast('Despesa deletada com sucesso', 'success');
-    finView('periodo');
+    finCarregar();
   } catch (e) {
     showToast(`Erro ao deletar: ${e.message}`, 'error');
   }

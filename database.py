@@ -1349,10 +1349,10 @@ def listar_vendas_financeiro(inicio: Optional[str] = None,
         """
         params: list = []
         if inicio:
-            sql += f" AND v.data_venda >= {PH}"
+            sql += f" AND substr(v.data_venda, 1, 10) >= {PH}"
             params.append(inicio)
         if fim:
-            sql += f" AND v.data_venda <= {PH}"
+            sql += f" AND substr(v.data_venda, 1, 10) <= {PH}"
             params.append(fim)
         sql += " ORDER BY v.data_venda DESC"
         cur.execute(sql, params)
