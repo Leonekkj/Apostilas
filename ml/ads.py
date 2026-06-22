@@ -71,10 +71,14 @@ def sincronizar_gasto_ads(inicio: str, fim: str) -> dict:
             continue
         ref = f"{c.get('id', 'camp')}:{inicio}:{fim}"
         nome = c.get("name") or "Campanha ML Ads"
-        database.upsert_despesa_ads(
-            descricao=f"Ads: {nome} ({inicio}..{fim})",
-            valor=round(cost, 2), data=fim, ref_externa=ref,
-        )
+        try:
+            database.upsert_despesa_ads(
+                descricao=f"Ads: {nome} ({inicio}..{fim})",
+                valor=round(cost, 2), data=fim, ref_externa=ref,
+            )
+        except Exception as e:
+            return {"importados": importados, "total": round(total, 2),
+                    "aviso": f"erro ao salvar despesas de ads: {e}"}
         importados += 1
         total += cost
 
