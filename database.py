@@ -219,6 +219,18 @@ def criar_tabelas() -> None:
                 criado_em TEXT DEFAULT {now_expr}
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS despesas (
+                id          {serial} PRIMARY KEY,
+                categoria   TEXT NOT NULL,
+                descricao   TEXT DEFAULT '',
+                valor       REAL NOT NULL,
+                data        TEXT NOT NULL,
+                origem      TEXT DEFAULT 'manual',
+                ref_externa TEXT DEFAULT '',
+                criado_em   TEXT DEFAULT {now_expr}
+            )
+            """,
         ]
 
         if USE_POSTGRES:
@@ -274,6 +286,8 @@ def criar_tabelas() -> None:
         _add_columns(cur, conn, "vendas", [
             ("comprador_id",  "TEXT DEFAULT ''"),
             ("pdf_entregue",  "INTEGER DEFAULT 0"),
+            ("comissao_ml",   "REAL DEFAULT 0.0"),
+            ("frete_custo",   "REAL DEFAULT 0.0"),
         ])
 
         # Tabela: produtos
