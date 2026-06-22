@@ -317,6 +317,13 @@ def criar_tabelas() -> None:
         publico_alvo="crianças com TDAH (5-12 anos)",
         colecao="Foco e Aprender",
     )
+    _upsert_topico(
+        "Estimulação Cognitiva Alzheimer",
+        "estimulacao-cognitiva-alzheimer",
+        "alzheimer demência estimulação cognitiva idosos memória atenção orientação linguagem atividades",
+        publico_alvo="idosos com Alzheimer e demência (leve a moderada)",
+        colecao="Mente Ativa",
+    )
 
 
 def _add_columns(cur, conn, table: str, columns: list) -> None:
