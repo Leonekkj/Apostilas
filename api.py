@@ -36,9 +36,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import database
+import financeiro
 from ml import client as ml_client
 from ml import orders as ml_orders
 from ml import messages as ml_messages
+from ml import ads as ml_ads
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -1105,10 +1107,15 @@ async def sincronizar_vendas(auth=Depends(_require_auth)):
                 continue
             comprador_nickname = pedido.get("buyer", {}).get("nickname", "")
             data_venda = pedido.get("date_created", "")
-            for item in pedido.get("order_items", []):
+            frete_pedido = ml_orders.custo_frete_pedido(pedido)
+            itens = pedido.get("order_items", [])
+            for idx, item in enumerate(itens):
                 ml_item_id = item.get("item", {}).get("id", "")
                 valor = float(item.get("unit_price", 0))
                 quantidade = int(item.get("quantity", 1))
+                comissao = float(item.get("sale_fee", 0) or 0)
+                # frete é do pedido inteiro: atribui ao 1º item, 0 nos demais
+                frete = frete_pedido if idx == 0 else 0.0
                 anuncio_id = database.buscar_anuncio_id_por_ml_id(ml_item_id)
                 database.salvar_venda(
                     ml_order_id=ml_order_id,
@@ -1117,6 +1124,8 @@ async def sincronizar_vendas(auth=Depends(_require_auth)):
                     valor=valor,
                     quantidade=quantidade,
                     data_venda=data_venda,
+                    comissao_ml=comissao,
+                    frete_custo=frete,
                 )
                 importados += 1
         return importados
@@ -1143,6 +1152,84 @@ async def listar_vendas(
     return await asyncio.to_thread(
         database.listar_vendas, apostila_id, anuncio_id, sem_apostila
     )
+
+
+# ---------------------------------------------------------------------------
+# Painel Financeiro
+# ---------------------------------------------------------------------------
+
+class DespesaIn(BaseModel):
+    categoria: str
+    descricao: str = ""
+    valor: float
+    data: str  # 'YYYY-MM-DD'
+
+
+class AdsSyncIn(BaseModel):
+    inicio: str
+    fim: str
+
+
+@app.get("/api/admin/financeiro/resumo")
+async def financeiro_resumo(inicio: Optional[str] = None, fim: Optional[str] = None,
+                            _auth=Depends(_require_auth)):
+    def _calc():
+        vendas = database.listar_vendas_financeiro(inicio, fim)
+        despesas = database.listar_despesas(None, inicio, fim)
+        return financeiro.resumo_periodo(vendas, despesas)
+    return await asyncio.to_thread(_calc)
+
+
+@app.get("/api/admin/financeiro/por-produto")
+async def financeiro_por_produto(inicio: Optional[str] = None, fim: Optional[str] = None,
+                                 _auth=Depends(_require_auth)):
+    def _calc():
+        vendas = database.listar_vendas_financeiro(inicio, fim)
+        despesas = database.listar_despesas(None, inicio, fim)
+        return financeiro.por_produto(vendas, despesas)
+    return await asyncio.to_thread(_calc)
+
+
+@app.get("/api/admin/financeiro/por-venda")
+async def financeiro_por_venda(inicio: Optional[str] = None, fim: Optional[str] = None,
+                               _auth=Depends(_require_auth)):
+    def _rows():
+        vendas = database.listar_vendas_financeiro(inicio, fim)
+        for v in vendas:
+            v["margem"] = financeiro.margem_venda(v)
+        return vendas
+    return await asyncio.to_thread(_rows)
+
+
+@app.get("/api/admin/despesas")
+async def listar_despesas_ep(categoria: Optional[str] = None, inicio: Optional[str] = None,
+                             fim: Optional[str] = None, _auth=Depends(_require_auth)):
+    return await asyncio.to_thread(database.listar_despesas, categoria, inicio, fim)
+
+
+@app.post("/api/admin/despesas")
+async def criar_despesa_ep(d: DespesaIn, _auth=Depends(_require_auth)):
+    new_id = await asyncio.to_thread(
+        database.salvar_despesa, d.categoria, d.descricao, d.valor, d.data)
+    return {"id": new_id}
+
+
+@app.put("/api/admin/despesas/{id}")
+async def atualizar_despesa_ep(id: int, d: DespesaIn, _auth=Depends(_require_auth)):
+    await asyncio.to_thread(
+        database.atualizar_despesa, id, d.categoria, d.descricao, d.valor, d.data)
+    return {"ok": True}
+
+
+@app.delete("/api/admin/despesas/{id}")
+async def deletar_despesa_ep(id: int, _auth=Depends(_require_auth)):
+    await asyncio.to_thread(database.deletar_despesa, id)
+    return {"ok": True}
+
+
+@app.post("/api/admin/ads/sincronizar")
+async def sincronizar_ads_ep(body: AdsSyncIn, _auth=Depends(_require_auth)):
+    return await asyncio.to_thread(ml_ads.sincronizar_gasto_ads, body.inicio, body.fim)
 
 
 # ---------------------------------------------------------------------------

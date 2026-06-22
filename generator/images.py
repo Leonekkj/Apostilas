@@ -91,12 +91,12 @@ def _build_ai_prompts(titulo: str, num_exercicios: int = 60, serie_romano: str =
     cover_desc_v2 = (
         f"brand name COGNIVITA in small bold dark green at top, large centered title \"{titulo}\" in dark forest green, "
         f"{'smaller text \"Volume ' + serie_romano + '\" below title in sage green italic, ' if serie_romano else ''}"
-        f"rounded badge reading \"{ex}\" at bottom. Gold spiral binding on left. "
+        f"rounded badge reading \"{ex}\" at bottom. Prominent black wire-o plastic spiral binding with clearly visible coils on the left edge."
     )
     cover_desc_v3 = (
         f"brand name COGNIVITA in small bold dark green at top, large title \"{titulo}\" centered in dark forest green, "
         f"{'smaller text \"Volume ' + serie_romano + '\" below in sage green, ' if serie_romano else ''}"
-        f"rounded badge \"{ex}\" at bottom. Gold spiral binding on left. "
+        f"rounded badge \"{ex}\" at bottom. Prominent black wire-o plastic spiral binding with clearly visible coils on the left edge."
     )
 
     return {
@@ -106,7 +106,7 @@ def _build_ai_prompts(titulo: str, num_exercicios: int = 60, serie_romano: str =
             f"Hero: one thick closed spiral-bound workbook standing upright centered on a {ambiente_v1}, cover fully sharp and in focus. "
             f"Cover design: warm cream background with subtle watercolor organic shapes in dark forest green at top and bottom edges. "
             f"{cover_desc_v1}"
-            f"Warm gold spiral binding on left side, thick pages visible on right side showing book depth. "
+            f"Prominent black wire-o plastic spiral binding with clearly visible coils running down the entire left edge, thick pages visible on right side showing book depth. "
             f"Gentle warm shadow, airy premium editorial mood, ultra sharp cover detail."
         ),
         # v2 — Lifestyle: idosa usando o caderno
@@ -1148,7 +1148,7 @@ def _layout_split(img: Image.Image, draw: ImageDraw.ImageDraw,
 
     # Especificações rápidas
     font_spec = _font_regular(28)
-    specs = ["Tamanho A4  ·  Impressão P&B", "Fonte Ampliada para Idosos", "Apostila Física Encadernada"]
+    specs = ["Tamanho A4  ·  Impressão Colorida", "Fonte Ampliada para Idosos", "Apostila Física Encadernada"]
     for sp in specs:
         draw.text((rx0, ty), sp, font=font_spec, fill=_blend(cor_escura, (255, 255, 255), 0.3))
         ty += 42
@@ -1672,8 +1672,13 @@ def gerar_capas_kit(
     kit_nome: str,
     apostilas: list[dict],
     variacao: int = None,
+    exigir_ia: bool = False,
 ) -> list[str]:
-    """Gera capas para um kit de apostilas."""
+    """Gera capas para um kit de apostilas.
+
+    exigir_ia=True: se a capa v1 NÃO vier da IA (crédito/erro → cairia no Pillow feio),
+    aborta e retorna [] — usado na geração automática para nunca publicar capa Pillow.
+    """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     total_exercicios = sum(a.get("num_exercicios", 0) for a in apostilas)
@@ -1691,8 +1696,19 @@ def gerar_capas_kit(
     ]
     prompts = _build_kit_ai_prompts(apostilas_info, total_exercicios)
     ai_images = _fetch_ai_images_for_variacoes(variacoes, prompts)
-    paths = []
 
+    # Proteção anti-Pillow: na geração automática, só seguimos se a capa principal
+    # (v1) veio da IA. Sem isso, um crédito/erro na IA publicaria capa Pillow feia.
+    v1_precisa = (variacao is None) or (variacao == 1)
+    v1_existe = (OUTPUT_DIR / f"kit_{kit_id}_v1.png").exists()
+    if exigir_ia and v1_precisa and ai_images.get(1) is None and not v1_existe:
+        logger.warning("Kit %s: capa v1 não veio da IA (crédito/erro) — abortando para não publicar Pillow", kit_id)
+        for entry in ai_images.values():
+            try: entry[0].close()
+            except Exception: pass
+        return []
+
+    paths = []
     for v in variacoes:
         fname = OUTPUT_DIR / f"kit_{kit_id}_v{v}.png"
         # Reutiliza imagem já gerada no disco — evita chamada AI desnecessária
@@ -1775,3 +1791,64 @@ def gerar_capa_produto(
         paths.append(str(fname))
 
     return paths
+
+
+# ---------------------------------------------------------------------------
+# Arte de capa por tema (cena editorial SEM texto — overlay de marca é via CSS)
+# ---------------------------------------------------------------------------
+
+_CAPAS_IA_DIR = Path(__file__).parent.parent / "assets" / "capas_ia"
+
+THEME_COVER_PROMPTS = {
+    "geral": "Vertical portrait editorial illustration for seniors, soft warm style. A cozy living-room corner: comfortable armchair, warm afternoon light through a window, reading glasses, a cup of tea and a small potted plant on a side table. Muted palette of deep forest green, cream and soft gold. Calm, sophisticated, welcoming mood. The lower third of the image gradually darkens to deep green, clean and uncluttered for text overlay. Absolutely no book, notebook, workbook, binder or magazine, and no text, letters or words anywhere in the image. 3:4 aspect ratio.",
+    "futebol": "Vertical portrait editorial illustration for seniors, soft warm style. A nostalgic Brazilian football scene: vintage leather football on fresh grass, stadium silhouette in soft golden evening light, gentle bokeh. Muted palette of deep forest green, cream and warm gold. Calm nostalgic mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no book, notebook or workbook, and no text, letters or numbers anywhere. 3:4 aspect ratio.",
+    "animais": "Vertical portrait editorial illustration for seniors, soft warm style. Gentle watercolor-style animals: a songbird on a branch, a sleeping cat, a friendly golden retriever, soft botanical leaves around them. Muted palette of deep forest green, cream and soft terracotta. Calm, tender mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no book, notebook or workbook, and no text or letters anywhere. 3:4 aspect ratio.",
+    "brasil": "Vertical portrait editorial illustration for seniors, soft warm style. Affectionate Brazilian landscape collage: colonial town with colorful facades, palm trees, gentle mountains at golden hour, a flying flock of birds. Muted palette of deep forest green, cream, warm yellow and soft blue. Calm nostalgic mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no book, notebook or workbook, and no text or letters anywhere. 3:4 aspect ratio.",
+    "culinaria": "Vertical portrait editorial illustration for seniors, soft warm style. A warm Brazilian kitchen still life: clay pot, fresh bread, coffee in an enamel mug, herbs, wooden spoon, soft morning light. Muted palette of deep forest green, cream and terracotta. Cozy homely mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no book, notebook or workbook, and no text or letters anywhere. 3:4 aspect ratio.",
+    "musica": "Vertical portrait editorial illustration for seniors, soft warm style. A nostalgic music corner: acoustic guitar leaning on a wooden chair, old radio, vinyl record, soft floating musical notes, warm window light. Muted palette of deep forest green, cream and soft gold. Calm nostalgic mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no book, notebook or workbook, and no text or letters anywhere. 3:4 aspect ratio.",
+    "natureza": "Vertical portrait editorial illustration for seniors, soft warm style. A serene garden scene: blooming ipê tree, butterflies, a small wooden bench under soft dappled sunlight, gentle stream, lush green leaves. Muted palette of deep forest green, cream and soft yellow. Peaceful mood. The lower third gradually darkens to deep green, clean for text overlay. Absolutely no book, notebook or workbook, and no text or letters anywhere. 3:4 aspect ratio.",
+}
+
+def _capa_existente(tema: str) -> "str | None":
+    for ext in (".png", ".jpg", ".jpeg", ".webp"):
+        p = _CAPAS_IA_DIR / f"{tema}{ext}"
+        if p.exists():
+            return str(p)
+    return None
+
+def gerar_arte_capa_tema(tema: str) -> "str | None":
+    """Retorna o caminho da arte de capa (cena editorial SEM texto) do tema.
+    Cacheia em assets/capas_ia/{tema}.png e reusa. Gera via _fetch_ai_image.
+    Retorna None se não houver prompt do tema ou se a geração falhar."""
+    tema = (tema or "geral").strip().lower()
+    if tema not in THEME_COVER_PROMPTS:
+        tema = "geral"
+
+    cached = _capa_existente(tema)
+    if cached:
+        return cached
+
+    prompt = THEME_COVER_PROMPTS[tema]
+    img, fonte = _fetch_ai_image(prompt)
+    if img is None:
+        logger.warning("Arte de capa tema '%s': geração IA falhou", tema)
+        return None
+
+    # recorta para retrato 3:4 (centralizado) se vier quadrada
+    w, h = img.size
+    alvo = 3 / 4
+    if abs((w / h) - alvo) > 0.02:
+        nova_h = h
+        nova_w = int(h * alvo)
+        if nova_w > w:
+            nova_w = w
+            nova_h = int(w / alvo)
+        left = (w - nova_w) // 2
+        top = (h - nova_h) // 2
+        img = img.crop((left, top, left + nova_w, top + nova_h))
+
+    _CAPAS_IA_DIR.mkdir(parents=True, exist_ok=True)
+    dest = _CAPAS_IA_DIR / f"{tema}.png"
+    img.save(dest, "PNG")
+    logger.info("Arte de capa tema '%s' gerada via %s → %s", tema, fonte, dest)
+    return str(dest)

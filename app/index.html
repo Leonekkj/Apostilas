@@ -968,6 +968,9 @@
         <button class="nav-item" data-tab="vendas" onclick="switchTab('vendas')">
           <span class="nav-icon">💰</span> Vendas
         </button>
+        <button class="nav-item" data-tab="financeiro" onclick="switchTab('financeiro')">
+          <span class="nav-icon">📊</span> Financeiro
+        </button>
       </nav>
 
       <div class="sidebar-bottom">
@@ -1084,6 +1087,50 @@
       <div class="page-content">
         <div id="vendas-grid" class="vendas-grid">
           <p style="color:var(--muted);font-size:13px;">Clique em "Sincronizar" para buscar as vendas do Mercado Livre.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── FINANCEIRO ────────────────────────── -->
+    <div id="tab-financeiro" class="tab-panel">
+      <div class="page-header">
+        <h2 class="page-title">Financeiro</h2>
+      </div>
+      <div class="page-content">
+        <div class="filtros" style="display:flex;gap:10px;margin-bottom:20px;align-items:center;">
+          <input type="date" id="fin-inicio" style="padding:8px;border:1px solid var(--border);border-radius:4px;font-size:14px;">
+          <input type="date" id="fin-fim" style="padding:8px;border:1px solid var(--border);border-radius:4px;font-size:14px;">
+          <button class="btn btn-primary" onclick="finCarregar()">Aplicar</button>
+          <button class="btn" onclick="finSincronizarAds()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);">Sincronizar Ads</button>
+        </div>
+
+        <div id="fin-kpis" class="stats-bar" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin-bottom:30px;">
+          <div class="spinner-page"></div>
+        </div>
+
+        <div class="subtabs" style="display:flex;gap:8px;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:10px;">
+          <button class="filter-btn active" onclick="finView('periodo')" data-fin-view="periodo">Período (Despesas)</button>
+          <button class="filter-btn" onclick="finView('produto')" data-fin-view="produto">Por Produto</button>
+          <button class="filter-btn" onclick="finView('venda')" data-fin-view="venda">Por Venda</button>
+        </div>
+
+        <div class="table-wrap">
+          <div id="fin-tabela"></div>
+        </div>
+
+        <div style="margin-top:40px;padding:20px;background:var(--surface);border-radius:8px;">
+          <h3 style="margin-top:0;">Lançar Despesa</h3>
+          <form onsubmit="finSalvarDespesa(event)" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;">
+            <select id="fin-cat" style="padding:8px;border:1px solid var(--border);border-radius:4px;font-size:14px;">
+              <option value="grafica">Gráfica</option>
+              <option value="ads">Ads</option>
+              <option value="outro">Outro</option>
+            </select>
+            <input id="fin-desc" placeholder="Descrição" style="padding:8px;border:1px solid var(--border);border-radius:4px;font-size:14px;">
+            <input id="fin-valor" type="number" step="0.01" placeholder="Valor" style="padding:8px;border:1px solid var(--border);border-radius:4px;font-size:14px;">
+            <input id="fin-data" type="date" style="padding:8px;border:1px solid var(--border);border-radius:4px;font-size:14px;">
+            <button type="submit" class="btn btn-primary">Salvar Despesa</button>
+          </form>
         </div>
       </div>
     </div>
@@ -1349,11 +1396,12 @@ function switchTab(name) {
   if (name === 'anuncios') loadAnuncios();
   if (name === 'kits') loadKits();
   if (name === 'vendas') loadVendasResumo();
+  if (name === 'financeiro') { finDefaults(); finCarregar(); }
 }
 
 function initTabFromHash() {
   const hash = window.location.hash.replace('#', '');
-  if (['produtos', 'kits', 'anuncios', 'vendas'].includes(hash)) {
+  if (['produtos', 'kits', 'anuncios', 'vendas', 'financeiro'].includes(hash)) {
     switchTab(hash);
   }
 }
@@ -2546,6 +2594,126 @@ async function linkApostila(anuncioId, selectEl) {
     showToast(`Erro ao linkar: ${e.message}`, 'error');
   } finally {
     selectEl.disabled = false;
+  }
+}
+
+// ─────────────────────────────────────────────
+// Financeiro
+// ─────────────────────────────────────────────
+async function finGet(path) {
+  const r = await apiFetch(path);
+  return r.json();
+}
+async function finPost(path, body) {
+  const r = await apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
+  return r.json();
+}
+async function finDelete(path) {
+  const r = await apiFetch(path, { method: 'DELETE' });
+  return r.json();
+}
+
+function finPeriodo() {
+  return {
+    inicio: document.getElementById('fin-inicio').value,
+    fim: document.getElementById('fin-fim').value
+  };
+}
+
+function finDefaults() {
+  const hoje = new Date();
+  const ini = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  document.getElementById('fin-inicio').value = ini.toISOString().slice(0, 10);
+  document.getElementById('fin-fim').value = hoje.toISOString().slice(0, 10);
+  document.getElementById('fin-data').value = hoje.toISOString().slice(0, 10);
+}
+
+async function finCarregar() {
+  const { inicio, fim } = finPeriodo();
+  try {
+    const r = await finGet(`/api/admin/financeiro/resumo?inicio=${inicio}&fim=${fim}`);
+    document.getElementById('fin-kpis').innerHTML = `
+      <div class="stat-chip"><strong>R$ ${r.faturamento.toFixed(2)}</strong><br>Faturamento</div>
+      <div class="stat-chip"><strong>R$ ${(r.comissao + r.frete).toFixed(2)}</strong><br>Tarifas ML</div>
+      <div class="stat-chip"><strong>R$ ${r.grafica.toFixed(2)}</strong><br>Gráfica</div>
+      <div class="stat-chip"><strong>R$ ${r.ads.toFixed(2)}</strong><br>Ads</div>
+      <div class="stat-chip"><strong>R$ ${r.lucro_liquido.toFixed(2)}</strong><br>Lucro Líquido</div>
+      <div class="stat-chip"><strong>${r.margem_pct.toFixed(1)}%</strong><br>Margem</div>
+    `;
+    finView('periodo');
+  } catch (e) {
+    showToast(`Erro ao carregar: ${e.message}`, 'error');
+  }
+}
+
+async function finView(modo) {
+  const { inicio, fim } = finPeriodo();
+  const el = document.getElementById('fin-tabela');
+
+  // Atualizar botões ativos
+  document.querySelectorAll('.subtabs button').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.subtabs button[data-fin-view="${modo}"]`).classList.add('active');
+
+  try {
+    if (modo === 'produto') {
+      const linhas = await finGet(`/api/admin/financeiro/por-produto?inicio=${inicio}&fim=${fim}`);
+      el.innerHTML = '<table><thead><tr><th>Produto</th><th>Faturamento</th><th>Tarifas</th><th>Margem Contrib.</th><th>Rateio</th><th>Lucro Líquido Est.</th></tr></thead><tbody>' +
+        linhas.map(l => `<tr><td>${l.produto_nome}</td><td>R$ ${l.faturamento.toFixed(2)}</td><td>R$ ${l.tarifas.toFixed(2)}</td><td>R$ ${l.margem_contribuicao.toFixed(2)}</td><td>R$ ${l.rateio.toFixed(2)}</td><td>R$ ${l.lucro_liquido_estimado.toFixed(2)}</td></tr>`).join('') + '</tbody></table>';
+    } else if (modo === 'venda') {
+      const linhas = await finGet(`/api/admin/financeiro/por-venda?inicio=${inicio}&fim=${fim}`);
+      el.innerHTML = '<table><thead><tr><th>Data</th><th>Produto</th><th>Quantidade</th><th>Valor Unit.</th><th>Total</th><th>Comissão ML</th><th>Frete</th><th>Margem</th></tr></thead><tbody>' +
+        linhas.map(v => `<tr><td>${(v.data_venda || '').slice(0, 10)}</td><td>${v.produto_nome}</td><td>${v.quantidade}</td><td>R$ ${v.valor.toFixed(2)}</td><td>R$ ${(v.valor * v.quantidade).toFixed(2)}</td><td>R$ ${(v.comissao_ml || 0).toFixed(2)}</td><td>R$ ${(v.frete_custo || 0).toFixed(2)}</td><td>R$ ${v.margem.toFixed(2)}</td></tr>`).join('') + '</tbody></table>';
+    } else {
+      const d = await finGet(`/api/admin/despesas?inicio=${inicio}&fim=${fim}`);
+      el.innerHTML = '<h4>Despesas do Período</h4><table><thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Valor</th><th></th></tr></thead><tbody>' +
+        d.map(x => `<tr><td>${(x.data || '').slice(0, 10)}</td><td>${x.categoria}</td><td>${x.descricao}</td><td>R$ ${x.valor.toFixed(2)}</td><td><button class="btn" onclick="finDeletar(${x.id})" style="background:var(--error,#c0392b);color:white;padding:4px 8px;font-size:12px;border:none;border-radius:3px;">Deletar</button></td></tr>`).join('') + '</tbody></table>';
+    }
+  } catch (e) {
+    showToast(`Erro ao carregar tabela: ${e.message}`, 'error');
+  }
+}
+
+async function finSalvarDespesa(e) {
+  e.preventDefault();
+  try {
+    await finPost('/api/admin/despesas', {
+      categoria: document.getElementById('fin-cat').value,
+      descricao: document.getElementById('fin-desc').value,
+      valor: parseFloat(document.getElementById('fin-valor').value),
+      data: document.getElementById('fin-data').value,
+    });
+    showToast('Despesa salva com sucesso', 'success');
+    document.getElementById('fin-desc').value = '';
+    document.getElementById('fin-valor').value = '';
+    finCarregar();
+  } catch (e) {
+    showToast(`Erro ao salvar: ${e.message}`, 'error');
+  }
+}
+
+async function finDeletar(id) {
+  if (!confirm('Deletar essa despesa?')) return;
+  try {
+    await finDelete(`/api/admin/despesas/${id}`);
+    showToast('Despesa deletada com sucesso', 'success');
+    finCarregar();
+  } catch (e) {
+    showToast(`Erro ao deletar: ${e.message}`, 'error');
+  }
+}
+
+async function finSincronizarAds() {
+  const { inicio, fim } = finPeriodo();
+  try {
+    const r = await finPost('/api/admin/ads/sincronizar', { inicio, fim });
+    if (r.aviso) {
+      showToast(`Ads: ${r.aviso}`, 'info');
+    } else {
+      showToast(`Ads importados: ${r.importados} (Total: R$ ${r.total.toFixed(2)})`, 'success');
+    }
+    finCarregar();
+  } catch (e) {
+    showToast(`Erro ao sincronizar: ${e.message}`, 'error');
   }
 }
 </script>

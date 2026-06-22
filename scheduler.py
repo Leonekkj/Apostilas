@@ -109,10 +109,14 @@ def sincronizar_e_gerar_pdfs():
             data_venda = pedido.get("date_created", "")
             venda_nova = False
             tipo_anuncio = ""
-            for item in pedido.get("order_items", []):
+            frete_pedido = ml_orders.custo_frete_pedido(pedido)
+            itens = pedido.get("order_items", [])
+            for idx, item in enumerate(itens):
                 ml_item_id = item.get("item", {}).get("id", "")
                 valor = float(item.get("unit_price", 0))
                 quantidade = int(item.get("quantity", 1))
+                comissao = float(item.get("sale_fee", 0) or 0)
+                frete = frete_pedido if idx == 0 else 0.0
                 anuncio_id = database.buscar_anuncio_id_por_ml_id(ml_item_id)
                 nova = database.salvar_venda(
                     ml_order_id=ml_order_id,
@@ -122,6 +126,8 @@ def sincronizar_e_gerar_pdfs():
                     quantidade=quantidade,
                     data_venda=data_venda,
                     comprador_id=comprador_id,
+                    comissao_ml=comissao,
+                    frete_custo=frete,
                 )
                 venda_nova = venda_nova or nova
                 if anuncio_id and not tipo_anuncio:
@@ -145,9 +151,14 @@ def sincronizar_e_gerar_pdfs():
     logger.info(f"Apostilas vendidas sem PDF: {len(pendentes)}")
     for ap in pendentes:
         try:
-            # capa_img: dormente — quando houver arte de IA boa (assets/capas_ia/
-            # ou gerador melhor), plugar aqui. Sem ela, sai a capa premium CSS.
-            capa_img = None
+            # Arte de capa por tema (IA, cacheada). None → capa CSS de marca (fallback).
+            from generator import images as _img
+            tema = ap.get("tema") or "geral"
+            try:
+                capa_img = _img.gerar_arte_capa_tema(tema)
+            except Exception as e:
+                logger.warning("Falha ao resolver arte de capa (tema=%s): %s", tema, e)
+                capa_img = None
 
             if ap.get("dificuldade"):
                 # Caça-palavras: gerador próprio (puzzles), NÃO o genérico de exercícios
@@ -231,8 +242,14 @@ def gerar_kits_automaticos():
                     titulos = gen_content.gerar_titulos_kit_ml(nome, apostilas_objs, total_exercicios)
                     descricao = gen_content.gerar_descricao_kit_ml(nome, apostilas_objs, total_exercicios)
 
-                    # Gera v1/v2/v3 uma única vez por kit — reutiliza para os 6 anúncios
-                    all_image_paths = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs)
+                    # Gera v1/v2/v3 uma única vez por kit — reutiliza para os 6 anúncios.
+                    # exigir_ia=True: se a IA de imagem falhar (crédito/erro), aborta o kit
+                    # em vez de publicar capa Pillow feia.
+                    all_image_paths = gen_images.gerar_capas_kit(kit_id, nome, apostilas_objs, exigir_ia=True)
+                    if not all_image_paths:
+                        logger.warning("Kit '%s' pulado: IA de imagem indisponível (não publica capa Pillow)", nome)
+                        kits_pulados += 1
+                        continue
 
                     novos_anuncio_ids = []
                     for i, title in enumerate(titulos, start=1):

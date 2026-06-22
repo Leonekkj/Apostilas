@@ -6,6 +6,8 @@ Converte conteúdo de apostila para HTML pronto para impressão via Playwright.
 import json
 import html as _html_escape
 
+from generator import _pdf_assets
+
 COLOR_DARK = "#0C3322"
 COLOR_GREEN = "#1B6B4A"
 COLOR_BG = "#F7F3EC"
@@ -16,559 +18,7 @@ COLOR_LIGHT_GREEN = "#D4EDE3"
 
 
 def _css() -> str:
-    return f"""
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,400&family=DM+Sans:wght@300;400;500&display=swap');
-
-@page {{
-  size: A4;
-  margin: 18mm 20mm 20mm 20mm;
-}}
-
-* {{ box-sizing: border-box; margin: 0; padding: 0; }}
-
-body {{
-  font-family: 'DM Sans', Arial, sans-serif;
-  color: {COLOR_TEXT};
-  font-size: 12.5pt;
-  line-height: 1.65;
-  background: {COLOR_BG};
-}}
-
-.page {{ page-break-after: always; background: {COLOR_BG}; }}
-
-/* === CAPA === */
-.cover {{
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  min-height: 250mm;
-  background: {COLOR_BG};
-}}
-.cover-brand-bar {{
-  width: 100%;
-  background: {COLOR_DARK};
-  color: #C8DDD0;
-  font-family: 'DM Sans', sans-serif;
-  font-size: 11pt;
-  font-weight: 400;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  padding: 11px 0;
-  margin-bottom: 28mm;
-}}
-.cover-logo {{
-  font-family: 'Cormorant Garamond', serif;
-  font-weight: 600;
-  font-size: 42pt;
-  color: {COLOR_DARK};
-  letter-spacing: 0.08em;
-  line-height: 1.1;
-  margin-bottom: 5mm;
-}}
-.cover-rule {{
-  width: 50%;
-  border: none;
-  border-top: 1px solid {COLOR_GREEN};
-  margin: 0 auto 10mm auto;
-}}
-.cover-tagline {{
-  font-family: 'DM Sans', sans-serif;
-  font-weight: 300;
-  font-size: 10pt;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: {COLOR_MUTED};
-  margin-bottom: 10mm;
-}}
-.cover-title {{
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 28pt;
-  font-weight: 400;
-  color: {COLOR_TEXT};
-  margin-bottom: 4mm;
-  line-height: 1.2;
-}}
-.cover-subtitle {{
-  font-family: 'DM Sans', sans-serif;
-  font-weight: 300;
-  font-size: 13pt;
-  color: {COLOR_MUTED};
-  margin-bottom: 32mm;
-}}
-.cover-footer-bar {{
-  width: 100%;
-  border-top: 1px solid {COLOR_BORDER};
-  background: white;
-  color: {COLOR_GREEN};
-  font-family: 'DM Sans', sans-serif;
-  font-size: 10pt;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  padding: 9px 0;
-  margin-bottom: 4mm;
-}}
-.cover-domain {{
-  font-family: 'Cormorant Garamond', serif;
-  font-style: italic;
-  font-size: 11pt;
-  color: {COLOR_MUTED};
-}}
-
-/* === INSTRUÇÕES === */
-.instructions-header {{
-  background: {COLOR_DARK};
-  color: #C8DDD0;
-  font-family: 'DM Sans', sans-serif;
-  font-size: 10pt;
-  font-weight: 500;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  padding: 9px 14px;
-  margin-bottom: 8mm;
-}}
-.instructions-body {{
-  font-size: 12.5pt;
-  text-align: justify;
-  margin-bottom: 4mm;
-  color: {COLOR_TEXT};
-}}
-.instructions-tips-title {{
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 14pt;
-  font-weight: 600;
-  color: {COLOR_GREEN};
-  margin: 5mm 0 3mm 0;
-}}
-.instructions-tip {{
-  margin-bottom: 3mm;
-  padding-left: 4mm;
-  color: {COLOR_TEXT};
-}}
-.instructions-rule {{
-  border: none;
-  border-top: 1px solid {COLOR_BORDER};
-  margin: 6mm 0;
-}}
-.instructions-footer {{
-  font-size: 11pt;
-  text-align: justify;
-  color: {COLOR_MUTED};
-}}
-
-/* === EXERCÍCIOS === */
-.exercise {{
-  margin-bottom: 8mm;
-  page-break-inside: avoid;
-  break-inside: avoid;
-}}
-.exercises-block {{
-  /* Fluxo natural — Playwright gerencia quebras de página */
-}}
-.exercise-header {{
-  background: {COLOR_DARK};
-  color: #C8DDD0;
-  font-family: 'DM Sans', sans-serif;
-  font-size: 10pt;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  padding: 7px 14px;
-  margin-bottom: 4mm;
-}}
-.exercise-desc {{
-  font-size: 12.5pt;
-  text-align: justify;
-  margin-bottom: 3mm;
-  color: {COLOR_TEXT};
-}}
-.exercise-steps-title {{
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 13pt;
-  font-weight: 600;
-  color: {COLOR_GREEN};
-  margin-bottom: 1mm;
-}}
-.exercise-step {{
-  font-size: 12pt;
-  padding-left: 6mm;
-  margin-bottom: 2mm;
-  color: {COLOR_TEXT};
-}}
-.answer-label {{
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 12pt;
-  font-weight: 600;
-  color: {COLOR_GREEN};
-  margin: 3mm 0 2mm 0;
-}}
-.answer-line {{
-  border-top: 1px solid {COLOR_BORDER};
-  margin-bottom: 5mm;
-}}
-.answer-box {{
-  border: 1px solid {COLOR_BORDER};
-  background: white;
-  height: 50mm;
-  width: 140mm;
-  margin: 2mm 0 4mm 0;
-}}
-.answer-bullets {{
-  list-style: none;
-  margin: 2mm 0;
-}}
-.answer-bullets li {{
-  border-bottom: 1px solid {COLOR_BORDER};
-  padding: 5mm 0 1mm 0;
-  margin-bottom: 2mm;
-  font-size: 12.5pt;
-}}
-.exercise-separator {{
-  border: none;
-  border-top: 1px solid {COLOR_BORDER};
-  margin: 6mm 0;
-}}
-
-/* === LIGAR COLUNAS === */
-.match-container {{
-  display: flex;
-  gap: 0;
-  margin: 4mm 0;
-  width: 100%;
-}}
-.match-col-left, .match-col-right {{
-  flex: 1;
-}}
-.match-col-space {{
-  flex: 1;
-  border-left: 1px dashed {COLOR_BORDER};
-  border-right: 1px dashed {COLOR_BORDER};
-  margin: 0 4mm;
-}}
-.match-item {{
-  border-bottom: 1px solid {COLOR_BORDER};
-  padding: 7px 4px;
-  font-size: 12.5pt;
-}}
-.match-item-num {{
-  font-weight: 500;
-  color: {COLOR_GREEN};
-  margin-right: 4px;
-}}
-.match-item-letter {{
-  font-weight: 500;
-  color: {COLOR_GREEN};
-  margin-right: 4px;
-}}
-.match-answer-blank {{
-  display: inline-block;
-  width: 28px;
-  border-bottom: 1px solid {COLOR_TEXT};
-  margin-left: 6px;
-}}
-
-/* === COMPLETAR LACUNAS === */
-.completar-frases {{
-  margin: 4mm 0;
-}}
-.completar-frase {{
-  font-size: 13.5pt;
-  line-height: 2.6;
-  margin-bottom: 4mm;
-  padding: 4px 0;
-  border-bottom: 1px solid {COLOR_BORDER};
-}}
-.completar-blank {{
-  display: inline-block;
-  min-width: 80px;
-  border-bottom: 1.5px solid {COLOR_TEXT};
-  margin: 0 4px;
-}}
-.completar-opcoes {{
-  font-size: 11pt;
-  color: {COLOR_MUTED};
-  margin-top: 3mm;
-  padding: 7px 12px;
-  border: 1px solid {COLOR_BORDER};
-  background: white;
-}}
-.completar-opcoes-label {{
-  font-weight: 500;
-  color: {COLOR_GREEN};
-  margin-right: 6px;
-}}
-
-/* === SEQUÊNCIA === */
-.sequence-container {{
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin: 6mm 0;
-  padding: 4mm 0;
-}}
-.seq-item {{
-  border: 1.5px solid {COLOR_GREEN};
-  padding: 8px 18px;
-  font-size: 13pt;
-  font-weight: 500;
-  color: {COLOR_TEXT};
-  background: white;
-}}
-.seq-item.blank {{
-  border: 1.5px dashed {COLOR_BORDER};
-  min-width: 80px;
-  color: {COLOR_BORDER};
-  text-align: center;
-}}
-.seq-arrow {{
-  font-size: 14pt;
-  color: {COLOR_MUTED};
-}}
-
-/* === TABELA === */
-.response-table {{
-  width: 100%;
-  border-collapse: collapse;
-  margin: 4mm 0;
-  font-size: 11.5pt;
-}}
-.response-table th {{
-  background: {COLOR_DARK};
-  color: #C8DDD0;
-  padding: 8px 12px;
-  text-align: left;
-  font-weight: 500;
-  font-size: 10pt;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}}
-.response-table td {{
-  border: 1px solid {COLOR_BORDER};
-  height: 36px;
-  padding: 4px 10px;
-  background: white;
-}}
-.response-table tr:nth-child(even) td {{
-  background: {COLOR_BG};
-}}
-
-/* === APRESENTAÇÃO === */
-.apresentacao-body {{
-  font-size: 13pt;
-  line-height: 1.8;
-  text-align: justify;
-  color: {COLOR_TEXT};
-}}
-.apresentacao-body p {{
-  margin-bottom: 5mm;
-}}
-
-/* === ÍNDICE === */
-.indice {{
-  margin-top: 4mm;
-}}
-.indice-item {{
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  border-bottom: 1px dotted {COLOR_BORDER};
-  padding: 5px 0;
-  font-size: 13pt;
-}}
-.indice-fase-nome {{
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 14pt;
-  color: {COLOR_TEXT};
-}}
-.indice-secao {{
-  font-size: 10pt;
-  font-weight: 500;
-  color: {COLOR_GREEN};
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}}
-
-/* === ABERTURA DE FASE === */
-.fase-abertura {{
-  min-height: 200mm;
-}}
-.fase-bar {{
-  background: {COLOR_DARK};
-  padding: 14px 16px;
-  margin-bottom: 8mm;
-}}
-.fase-num {{
-  display: block;
-  font-family: 'DM Sans', sans-serif;
-  font-size: 9pt;
-  font-weight: 500;
-  color: {COLOR_LIGHT_GREEN};
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  margin-bottom: 2px;
-}}
-.fase-nome {{
-  display: block;
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 26pt;
-  font-weight: 600;
-  color: white;
-  line-height: 1.1;
-}}
-.fase-secao-tag {{
-  display: inline-block;
-  border: 1px solid {COLOR_GREEN};
-  color: {COLOR_GREEN};
-  font-size: 9pt;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  padding: 3px 10px;
-  margin-bottom: 5mm;
-}}
-.fase-objetivo {{
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 15pt;
-  font-style: italic;
-  color: {COLOR_MUTED};
-  margin-bottom: 6mm;
-  padding-bottom: 4mm;
-  border-bottom: 1px solid {COLOR_BORDER};
-}}
-.fase-abertura-text {{
-  font-size: 13pt;
-  line-height: 1.8;
-  text-align: justify;
-  color: {COLOR_TEXT};
-}}
-.fase-abertura-text p {{
-  margin-bottom: 4mm;
-}}
-
-/* === ROTINA SEMANAL === */
-.rotina-texto {{
-  font-size: 13pt;
-  line-height: 1.7;
-  text-align: justify;
-  margin-bottom: 6mm;
-  color: {COLOR_TEXT};
-}}
-.rotina-table {{
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12pt;
-}}
-.rotina-table th {{
-  background: {COLOR_DARK};
-  color: {COLOR_LIGHT_GREEN};
-  padding: 8px 12px;
-  text-align: left;
-  font-weight: 500;
-  font-size: 9.5pt;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}}
-.rotina-table td {{
-  border: 1px solid {COLOR_BORDER};
-  padding: 8px 12px;
-  vertical-align: middle;
-}}
-.rotina-table tr:nth-child(even) td {{
-  background: {COLOR_BG};
-}}
-.rotina-dia {{
-  font-weight: 500;
-  color: {COLOR_TEXT};
-  min-width: 40mm;
-}}
-.rotina-sugestao {{
-  color: {COLOR_MUTED};
-}}
-.rotina-check {{
-  width: 16mm;
-  text-align: center;
-}}
-.rotina-checkbox {{
-  width: 14px;
-  height: 14px;
-  border: 1.5px solid {COLOR_BORDER};
-  display: inline-block;
-}}
-
-/* === GABARITO === */
-.gabarito-grid {{
-  display: flex;
-  flex-direction: column;
-  gap: 3mm;
-  margin-top: 4mm;
-}}
-.gabarito-item {{
-  display: flex;
-  gap: 6mm;
-  align-items: baseline;
-  padding: 5px 8px;
-  border-bottom: 1px solid {COLOR_BORDER};
-  font-size: 12pt;
-}}
-.gabarito-num {{
-  font-weight: 700;
-  color: {COLOR_GREEN};
-  min-width: 20mm;
-  font-size: 11pt;
-}}
-.gabarito-titulo {{
-  color: {COLOR_MUTED};
-  font-size: 10pt;
-  min-width: 50mm;
-}}
-.gabarito-resposta {{
-  color: {COLOR_TEXT};
-  flex: 1;
-}}
-
-/* === CONTRACAPA === */
-.contracapa {{
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 240mm;
-  text-align: center;
-  background: {COLOR_DARK};
-}}
-.contracapa-logo {{
-  font-family: 'Cormorant Garamond', serif;
-  font-weight: 600;
-  font-size: 36pt;
-  color: white;
-  letter-spacing: 0.08em;
-  margin-bottom: 4mm;
-}}
-.contracapa-rule {{
-  width: 40%;
-  border: none;
-  border-top: 1px solid {COLOR_GREEN};
-  margin: 0 auto 6mm auto;
-}}
-.contracapa-tagline {{
-  font-family: 'DM Sans', sans-serif;
-  font-size: 10pt;
-  font-weight: 300;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: {COLOR_LIGHT_GREEN};
-  margin-bottom: 3mm;
-  opacity: 0.8;
-}}
-.contracapa-domain {{
-  font-family: 'Cormorant Garamond', serif;
-  font-style: italic;
-  font-size: 13pt;
-  color: {COLOR_LIGHT_GREEN};
-  opacity: 0.7;
-}}
-"""
+    return _pdf_assets.PREMIUM_CSS
 
 
 def _apresentacao_html(texto: str) -> str:
@@ -684,7 +134,7 @@ def _gabarito_html(gabarito: list) -> str:
 
 def _contracapa_html() -> str:
     return """
-<div class="page contracapa">
+<div class="page bleed contracapa">
   <div class="contracapa-logo">Cognivita</div>
   <hr class="contracapa-rule">
   <div class="contracapa-tagline">Coleção Bem Envelhecer</div>
@@ -703,14 +153,30 @@ def _cover_html(topico: dict, num_exercicios: int, capa_img=None) -> str:
         foto = file_data_uri(capa_img)
         if foto:
             return f"""
-<div class="page cover">
-  <img src="{foto}" alt=""
-       style="display:block; width:170mm; height:250mm; object-fit:cover; margin:0 auto;">
+<div class="page bleed cover">
+  <img class="ac-art" src="{foto}" alt="">
+  <div class="ac-shade"></div>
+  <div class="ac-brand">
+    <div class="ac-brand-name">COGNIVITA</div>
+    <div class="ac-brand-tag">Estimulação Cognitiva · 60+</div>
+  </div>
+  <div class="ac-content">
+    <div class="ac-kicker">Coleção Bem Envelhecer</div>
+    <div class="ac-title">Apostila de {nome}</div>
+    <div class="ac-sub">Para idosos 60+</div>
+    <div class="ac-chips">
+      <span class="chip solid">{num_exercicios} atividades</span>
+      <span class="chip">Letra grande</span>
+      <span class="chip">Material físico</span>
+    </div>
+    <hr class="ac-rule">
+    <div class="ac-domain">cognivita.com.br</div>
+  </div>
 </div>
 """
 
     return f"""
-<div class="page cover">
+<div class="page bleed cover">
   <div class="cover-brand-bar">Estimulação Cognitiva para Idosos</div>
   <div class="cover-logo">Cognivita</div>
   <hr class="cover-rule">
@@ -842,10 +308,18 @@ def _exercise_html(exercicio: dict) -> str:
     descricao = _html_escape.escape(str(exercicio.get("descricao", "")))
     instrucoes = exercicio.get("instrucoes", [])
     tipo = exercicio.get("tipo", "texto")
+    categoria = exercicio.get("categoria")
     dados = exercicio.get("dados_visuais") or {}
     espaco = exercicio.get("espaco_resposta", "linha")
 
-    header = f'<div class="exercise-header">EXERCÍCIO {numero} — {titulo.upper()}</div>'
+    icone = _pdf_assets.icon_for(categoria, tipo)
+    cat_label = _html_escape.escape(str(categoria)) if categoria else ""
+    cat_html = f'<div class="ex-cat">{cat_label}</div>' if cat_label else ""
+    header = (
+        f'{cat_html}'
+        f'<div class="ex-header"><span class="ex-ic">{icone}</span>'
+        f'<span class="ex-title">Exercício {numero} · {titulo}</span></div>'
+    )
     desc_html = f'<p class="exercise-desc">{descricao}</p>' if descricao else ""
 
     steps_html = ""
@@ -877,6 +351,65 @@ def _exercise_html(exercicio: dict) -> str:
 """
 
 
+def _exercise_height_mm(ex: dict) -> int:
+    """Estimativa de altura (mm) de um exercício, para empacotar o máximo de
+    exercícios por folha sem transbordar. Conservadora o suficiente para caber."""
+    tipo = ex.get("tipo", "texto")
+    espaco = ex.get("espaco_resposta", "linha")
+    dados = ex.get("dados_visuais") or {}
+    h = 42  # cabeçalho + descrição (~2 linhas) + "Como fazer" (~2 passos)
+    if tipo == "tabela":
+        linhas = dados.get("linhas", 5)
+        if isinstance(linhas, list):
+            linhas = linhas[0] if linhas else 5
+        h += 12 + int(linhas) * 9
+    elif tipo == "ligar":
+        n = max(len(dados.get("esquerda", [])), len(dados.get("direita", [])), 1)
+        h += 10 + n * 9
+    elif tipo == "completar":
+        n = len(dados.get("frases", [])) or 1
+        h += n * 13 + 14
+    elif tipo == "sequencia":
+        h += 28
+    else:  # texto e afins → depende do espaço de resposta
+        if espaco == "quadrado":
+            h += 58
+        elif espaco == "lista":
+            h += 46
+        else:  # linha (5 linhas)
+            h += 40
+    return h
+
+
+def _exercises_pages_html(exercicios: list) -> str:
+    """Empacota exercícios em folhas (.page) próprias preenchendo cada folha o
+    máximo possível (orçamento de altura), evitando que conteúdo fluido transborde
+    para uma folha sem moldura. Cada .page respeita a moldura porque o padding o
+    mantém dentro da keyline."""
+    if not exercicios:
+        return ""
+    PAGE_MM = 245  # área útil aproximada dentro da moldura/margens
+    DIVIDER_MM = 12
+    pages, current, used = [], [], 0
+    for ex in exercicios:
+        eh = _exercise_height_mm(ex)
+        add = eh + (DIVIDER_MM if current else 0)
+        if current and used + add > PAGE_MM:
+            pages.append(current)
+            current, used = [], 0
+            add = eh
+        current.append(ex)
+        used += add
+    if current:
+        pages.append(current)
+
+    html = ""
+    for group in pages:
+        inner = _pdf_assets.divider_svg().join(_exercise_html(e) for e in group)
+        html += f'<div class="page exercises-page">{inner}</div>'
+    return html
+
+
 def render_apostila_html(topico: dict, conteudo_json: str, capa_img=None) -> str:
     conteudo = json.loads(conteudo_json)
     exercicios = conteudo.get("exercicios", [])
@@ -899,8 +432,7 @@ def render_apostila_html(topico: dict, conteudo_json: str, capa_img=None) -> str
             conteudo_interno += _fase_abertura_html(fase)
             numeros = fase.get("exercicios_numeros", [])
             fase_exercicios = [ex_por_numero[n] for n in numeros if n in ex_por_numero]
-            exercises_html = "".join(_exercise_html(e) for e in fase_exercicios)
-            conteudo_interno += f'<div class="exercises-block">{exercises_html}</div>'
+            conteudo_interno += _exercises_pages_html(fase_exercicios)
 
         rotina = _rotina_semanal_html(conteudo.get("rotina_semanal", {}))
         gabarito = _gabarito_html(conteudo.get("gabarito", []))
@@ -909,8 +441,7 @@ def render_apostila_html(topico: dict, conteudo_json: str, capa_img=None) -> str
         body = f"{cover}{apresentacao}{indice}{conteudo_interno}{rotina}{gabarito}{contracapa}"
     else:
         instructions = _instructions_html(nome_topico, num_exercicios)
-        exercises_html = "".join(_exercise_html(e) for e in exercicios)
-        body = f"{cover}{instructions}<div class=\"exercises-block\">{exercises_html}</div>"
+        body = f"{cover}{instructions}{_exercises_pages_html(exercicios)}"
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -920,6 +451,7 @@ def render_apostila_html(topico: dict, conteudo_json: str, capa_img=None) -> str
   <style>{_css()}</style>
 </head>
 <body>
+  <div class="sheet-frame"></div>
   {body}
 </body>
 </html>

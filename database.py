@@ -219,6 +219,18 @@ def criar_tabelas() -> None:
                 criado_em TEXT DEFAULT {now_expr}
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS despesas (
+                id          {serial} PRIMARY KEY,
+                categoria   TEXT NOT NULL,
+                descricao   TEXT DEFAULT '',
+                valor       REAL NOT NULL,
+                data        TEXT NOT NULL,
+                origem      TEXT DEFAULT 'manual',
+                ref_externa TEXT DEFAULT '',
+                criado_em   TEXT DEFAULT {now_expr}
+            )
+            """,
         ]
 
         if USE_POSTGRES:
@@ -274,6 +286,8 @@ def criar_tabelas() -> None:
         _add_columns(cur, conn, "vendas", [
             ("comprador_id",  "TEXT DEFAULT ''"),
             ("pdf_entregue",  "INTEGER DEFAULT 0"),
+            ("comissao_ml",   "REAL DEFAULT 0.0"),
+            ("frete_custo",   "REAL DEFAULT 0.0"),
         ])
 
         # Tabela: produtos
@@ -316,6 +330,13 @@ def criar_tabelas() -> None:
         "TDAH atividades criança atenção concentração foco infantil tdah exercícios",
         publico_alvo="crianças com TDAH (5-12 anos)",
         colecao="Foco e Aprender",
+    )
+    _upsert_topico(
+        "Estimulação Cognitiva Alzheimer",
+        "estimulacao-cognitiva-alzheimer",
+        "alzheimer demência estimulação cognitiva idosos memória atenção orientação linguagem atividades",
+        publico_alvo="idosos com Alzheimer e demência (leve a moderada)",
+        colecao="Mente Ativa",
     )
 
 
@@ -1158,6 +1179,8 @@ def salvar_venda(
     quantidade: int,
     data_venda: str,
     comprador_id: str = "",
+    comissao_ml: float = 0.0,
+    frete_custo: float = 0.0,
 ) -> bool:
     """Upsert de uma venda pelo ml_order_id (não cria duplicatas).
 
@@ -1171,8 +1194,8 @@ def salvar_venda(
         if USE_POSTGRES:
             cur.execute(
                 """INSERT INTO vendas
-                   (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda, comprador_id)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda, comprador_id, comissao_ml, frete_custo)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT(ml_order_id) DO UPDATE SET
                      anuncio_id=EXCLUDED.anuncio_id,
                      comprador_nickname=EXCLUDED.comprador_nickname,
@@ -1180,14 +1203,16 @@ def salvar_venda(
                      quantidade=EXCLUDED.quantidade,
                      data_venda=EXCLUDED.data_venda,
                      comprador_id=EXCLUDED.comprador_id,
+                     comissao_ml=EXCLUDED.comissao_ml,
+                     frete_custo=EXCLUDED.frete_custo,
                      sincronizado_em=NOW()::TEXT""",
-                (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda, comprador_id),
+                (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda, comprador_id, comissao_ml, frete_custo),
             )
         else:
             cur.execute(
                 """INSERT INTO vendas
-                   (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda, comprador_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda, comprador_id, comissao_ml, frete_custo)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(ml_order_id) DO UPDATE SET
                      anuncio_id=excluded.anuncio_id,
                      comprador_nickname=excluded.comprador_nickname,
@@ -1195,8 +1220,10 @@ def salvar_venda(
                      quantidade=excluded.quantidade,
                      data_venda=excluded.data_venda,
                      comprador_id=excluded.comprador_id,
+                     comissao_ml=excluded.comissao_ml,
+                     frete_custo=excluded.frete_custo,
                      sincronizado_em=datetime('now')""",
-                (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda, comprador_id),
+                (ml_order_id, anuncio_id, comprador_nickname, valor, quantidade, data_venda, comprador_id, comissao_ml, frete_custo),
             )
         conn.commit()
         return nova
@@ -1299,6 +1326,136 @@ def resumo_vendas_por_apostila() -> list[dict]:
             })
 
         return rows
+
+
+def listar_vendas_financeiro(inicio: Optional[str] = None,
+                             fim: Optional[str] = None) -> list[dict]:
+    """Uma linha por venda, com custos e identificação de produto, no período."""
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        sql = f"""
+            SELECT
+                v.id, v.ml_order_id, v.valor, v.quantidade,
+                v.comissao_ml, v.frete_custo, v.data_venda,
+                an.id          AS anuncio_id,
+                an.titulo      AS anuncio_titulo,
+                ap.id          AS apostila_id,
+                tp.nome        AS topico_nome
+            FROM vendas v
+            LEFT JOIN anuncios  an ON v.anuncio_id  = an.id
+            LEFT JOIN apostilas ap ON an.apostila_id = ap.id
+            LEFT JOIN topicos   tp ON ap.topico_id   = tp.id
+            WHERE 1=1
+        """
+        params: list = []
+        if inicio:
+            sql += f" AND substr(v.data_venda, 1, 10) >= {PH}"
+            params.append(inicio)
+        if fim:
+            sql += f" AND substr(v.data_venda, 1, 10) <= {PH}"
+            params.append(fim)
+        sql += " ORDER BY v.data_venda DESC"
+        cur.execute(sql, params)
+        rows = _rows_to_dicts(cur.fetchall(), cur)
+
+    for r in rows:
+        if r.get("apostila_id"):
+            r["produto_chave"] = f"ap:{r['apostila_id']}"
+            r["produto_nome"] = r.get("topico_nome") or r.get("anuncio_titulo") or "Apostila"
+        elif r.get("anuncio_id"):
+            r["produto_chave"] = f"an:{r['anuncio_id']}"
+            r["produto_nome"] = r.get("anuncio_titulo") or "Anúncio"
+        else:
+            r["produto_chave"] = "outros"
+            r["produto_nome"] = "Outros anúncios"
+    return rows
+
+
+def listar_despesas(categoria: Optional[str] = None,
+                    inicio: Optional[str] = None,
+                    fim: Optional[str] = None) -> list[dict]:
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        sql = "SELECT * FROM despesas WHERE 1=1"
+        params: list = []
+        if categoria:
+            sql += f" AND categoria = {PH}"
+            params.append(categoria)
+        if inicio:
+            sql += f" AND data >= {PH}"
+            params.append(inicio)
+        if fim:
+            sql += f" AND data <= {PH}"
+            params.append(fim)
+        sql += " ORDER BY data DESC, id DESC"
+        cur.execute(sql, params)
+        return _rows_to_dicts(cur.fetchall(), cur)
+
+
+def salvar_despesa(categoria: str, descricao: str, valor: float, data: str,
+                   origem: str = "manual", ref_externa: str = "") -> int:
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        if USE_POSTGRES:
+            cur.execute(
+                """INSERT INTO despesas (categoria, descricao, valor, data, origem, ref_externa)
+                   VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (categoria, descricao, valor, data, origem, ref_externa),
+            )
+            new_id = cur.fetchone()["id"]
+        else:
+            cur.execute(
+                """INSERT INTO despesas (categoria, descricao, valor, data, origem, ref_externa)
+                   VALUES (?,?,?,?,?,?)""",
+                (categoria, descricao, valor, data, origem, ref_externa),
+            )
+            new_id = cur.lastrowid
+        conn.commit()
+        return new_id
+
+
+def atualizar_despesa(id: int, categoria: str, descricao: str,
+                      valor: float, data: str) -> None:
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        cur.execute(
+            f"""UPDATE despesas SET categoria={PH}, descricao={PH}, valor={PH}, data={PH}
+                WHERE id={PH}""",
+            (categoria, descricao, valor, data, id),
+        )
+        conn.commit()
+
+
+def deletar_despesa(id: int) -> None:
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        cur.execute(f"DELETE FROM despesas WHERE id={PH}", (id,))
+        conn.commit()
+
+
+def upsert_despesa_ads(descricao: str, valor: float, data: str, ref_externa: str) -> None:
+    """Idempotente: substitui o gasto de ads daquela campanha/dia se já existir."""
+    with _get_conn() as conn:
+        cur = _cursor(conn)
+        cur.execute(
+            f"""DELETE FROM despesas
+                WHERE categoria='ads' AND origem='ml_ads_api'
+                  AND ref_externa={PH} AND data={PH}""",
+            (ref_externa, data),
+        )
+        if USE_POSTGRES:
+            cur.execute(
+                """INSERT INTO despesas (categoria, descricao, valor, data, origem, ref_externa)
+                   VALUES ('ads', %s, %s, %s, 'ml_ads_api', %s)""",
+                (descricao, valor, data, ref_externa),
+            )
+        else:
+            cur.execute(
+                """INSERT INTO despesas (categoria, descricao, valor, data, origem, ref_externa)
+                   VALUES ('ads', ?, ?, ?, 'ml_ads_api', ?)""",
+                (descricao, valor, data, ref_externa),
+            )
+        conn.commit()
 
 
 def buscar_apostilas_vendidas_sem_pdf() -> list[dict]:
