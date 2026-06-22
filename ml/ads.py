@@ -52,8 +52,8 @@ def sincronizar_gasto_ads(inicio: str, fim: str) -> dict:
 
     try:
         r = requests.get(
-            f"{ML_API_BASE}/advertising/product_ads/campaigns",
-            params={"advertiser_id": adv, "date_from": inicio, "date_to": fim,
+            f"{ML_API_BASE}/advertising/advertisers/{adv}/product_ads/campaigns",
+            params={"date_from": inicio, "date_to": fim, "limit": 100,
                     "metrics": "cost", "metrics_summary": "true"},
             headers={**headers, "Api-Version": "1"},
             timeout=20,

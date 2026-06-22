@@ -82,12 +82,17 @@ def custo_frete_pedido(pedido: dict) -> float:
         if r.status_code != 200:
             return 0.0
         data = r.json()
-        # 'senders' carrega o custo do vendedor; estrutura varia por conta.
-        senders = data.get("senders") or {}
-        custo = senders.get("cost")
-        if custo is None:
-            gross = data.get("gross_amount")
-            custo = gross if gross is not None else 0.0
-        return round(float(custo or 0.0), 2)
+        # 'senders' é uma LISTA de remetentes; cada um traz o 'cost' pago pelo
+        # vendedor (frete grátis: receiver.cost=0, o sender é quem paga).
+        # Somamos os senders. NÃO usar 'gross_amount' (é o valor cheio do frete,
+        # não o custo líquido do vendedor após descontos).
+        senders = data.get("senders")
+        if isinstance(senders, list):
+            custo = sum(float((s or {}).get("cost") or 0.0) for s in senders)
+        elif isinstance(senders, dict):
+            custo = float(senders.get("cost") or 0.0)
+        else:
+            custo = 0.0
+        return round(custo, 2)
     except Exception:
         return 0.0
